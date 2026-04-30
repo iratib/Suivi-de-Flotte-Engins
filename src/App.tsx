@@ -22,8 +22,7 @@ import {
   Calendar,
   LayoutDashboard,
   BarChart3,
-  Lock,
-  Trash2
+  Lock
 } from 'lucide-react';
 import { useState, useEffect, useMemo, FormEvent } from 'react';
 import { motion } from 'motion/react';
@@ -50,7 +49,7 @@ const URL_FLOTTE   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq
 const URL_HISTORY  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique`;
 
 // Apps Script URL pour l'écriture — remplace par ton URL après déploiement Apps Script
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw2TbZCa0ebjwKpzpaQDux83r78o_WpQD24Hazx3NdugScYR01Y18aAokwRHllJ57dS/exec';
+const APPS_SCRIPT_URL = 'COLLE_TON_URL_APPS_SCRIPT_ICI';
 // ============================================================
 
 interface SheetData {
