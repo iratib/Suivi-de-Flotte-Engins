@@ -22,7 +22,8 @@ import {
   Calendar,
   LayoutDashboard,
   BarChart3,
-  Lock
+  Lock,
+  Trash2
 } from 'lucide-react';
 import { useState, useEffect, useMemo, FormEvent } from 'react';
 import { motion } from 'motion/react';
