@@ -45,8 +45,8 @@ import {
 // CONFIGURATION GOOGLE SHEETS
 // ============================================================
 const SHEET_ID = '1qMgsmIERDsUTfiYhyaDr3YPuXN7eJV0tlwHK1WhTIYI';
-const URL_FLOTTE   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Feuil1`;
-const URL_HISTORY  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique`;
+const URL_FLOTTE = () => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Feuil1&t=${Date.now()}`;
+const URL_HISTORY = () => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique&t=${Date.now()}`;
 
 // Apps Script URL pour l'écriture — remplace par ton URL après déploiement Apps Script
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz7hZyhCe2eWccydsMSSzbc3I_sLpC-g7oAPCtrdZRYnjIgBMQgh0VpMGStbWeH1f94/exec';
@@ -171,7 +171,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(URL_FLOTTE);
+      const response = await fetch(URL_FLOTTE());
       if (!response.ok) throw new Error('Failed to fetch');
       const text = await response.text();
       const rows = parseGviz(text);
@@ -202,7 +202,7 @@ export default function App() {
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      const response = await fetch(URL_HISTORY);
+      const response = await fetch(URL_HISTORY());
       if (!response.ok) throw new Error('Failed to fetch history');
       const text = await response.text();
       const rows = parseGviz(text);
