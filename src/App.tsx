@@ -41,6 +41,17 @@ import {
   LabelList
 } from 'recharts';
 
+// ============================================================
+// CONFIGURATION GOOGLE SHEETS
+// ============================================================
+const SHEET_ID = '1qMgsmIERDsUTfiYhyaDr3YPuXN7eJV0tlwHK1WhTIYI';
+const URL_FLOTTE   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Feuil1`;
+const URL_HISTORY  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique`;
+
+// Apps Script URL pour l'écriture — remplace par ton URL après déploiement Apps Script
+const APPS_SCRIPT_URL = 'COLLE_TON_URL_APPS_SCRIPT_ICI';
+// ============================================================
+
 interface SheetData {
   designation: string;
   numEngin: string;
@@ -59,6 +70,22 @@ interface HistoryItem {
   etat: string;
   observation: string;
 }
+
+// Parse la réponse gviz/tq de Google Sheets
+const parseGviz = (text: string): string[][] => {
+  try {
+    const json = JSON.parse(text.substring(47, text.length - 2));
+    return (json.table.rows || []).map((row: any) =>
+      (row.c || []).map((cell: any) => {
+        if (cell === null || cell === undefined) return '';
+        return cell.v !== null && cell.v !== undefined ? cell.v.toString() : '';
+      })
+    );
+  } catch (e) {
+    console.error('parseGviz error:', e);
+    return [];
+  }
+};
 
 export default function App() {
   const [data, setData] = useState<SheetData[]>([]);
@@ -84,7 +111,6 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
 
-  // Get unique designations for suggestions
   const suggestions = useMemo(() => {
     const unique = new Set(data.map(item => item.designation.toUpperCase()));
     return Array.from(unique).sort();
@@ -102,7 +128,6 @@ export default function App() {
   };
 
   const verifyPassword = () => {
-    // Simple verification (default: IRATIB)
     if (passwordInput === 'IRATIB') {
       setUserRole('admin');
       setShowPasswordModal(false);
@@ -124,7 +149,6 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Form State
   const [form, setForm] = useState({
     designation: '',
     numEngin: '',
@@ -133,54 +157,65 @@ export default function App() {
     observation: ''
   });
 
+  const getStatusType = (status: string): 'active' | 'warning' | 'error' => {
+    const s = status?.toUpperCase() || '';
+    if (s === 'OK' || s.includes('ACTIF')) return 'active';
+    if (s === 'HS' || s.includes('ARRÊTÉ')) return 'error';
+    return 'warning';
+  };
+
+  // ============================================================
+  // FETCH FLOTTE depuis Feuil1
+  // ============================================================
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/data');
-      if (!response.ok) throw new Error('Failed to fetch data');
-      const rows = await response.json();
-      
-      // The server returns rows. If using the CSV fetcher, rows is an array of arrays.
-      // If it's the first fetch, row 0 is Designation, NumEngin, etc.
-      const dataRows = rows.slice(1);
-      
-      const mappedData: SheetData[] = dataRows.map((row: any[], idx: number) => ({
+      const response = await fetch(URL_FLOTTE);
+      if (!response.ok) throw new Error('Failed to fetch');
+      const text = await response.text();
+      const rows = parseGviz(text);
+
+      const mappedData: SheetData[] = rows.map((row, idx) => ({
         designation: row[0] || 'Sans nom',
-        numEngin: row[1] || 'N/A',
-        zone: row[2] || 'INCONNU',
-        etat: row[3] || 'INCONNU',
+        numEngin:    row[1] || 'N/A',
+        zone:        row[2] || 'INCONNU',
+        etat:        row[3] || 'INCONNU',
         observation: row[4] || '',
-        statusType: getStatusType(row[3]),
-        rowIndex: idx + 2 // Row 1 is header, so first data row is 2
+        statusType:  getStatusType(row[3]),
+        rowIndex:    idx + 2
       }));
-      
+
       setData(mappedData);
       setCurrentTime(new Date().toLocaleString());
     } catch (err) {
       console.error(err);
-      setError('Impossible de se connecter au Google Sheet. Vérifiez votre configuration API ou l’URL publique.');
+      setError("Impossible de se connecter au Google Sheet. Vérifiez votre configuration API ou l'URL publique.");
     } finally {
       setLoading(false);
     }
   };
 
+  // ============================================================
+  // FETCH HISTORIQUE
+  // ============================================================
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      const response = await fetch('/api/history');
+      const response = await fetch(URL_HISTORY);
       if (!response.ok) throw new Error('Failed to fetch history');
-      const rows = await response.json();
-      
-      const mappedHistory: HistoryItem[] = rows.slice(1).map((row: any[]) => ({
-        timestamp: row[0] || '',
+      const text = await response.text();
+      const rows = parseGviz(text);
+
+      const mappedHistory: HistoryItem[] = rows.map((row) => ({
+        timestamp:   row[0] || '',
         designation: row[1] || 'Sans nom',
-        numEngin: row[2] || 'N/A',
-        zone: row[3] || 'INCONNU',
-        etat: row[4] || 'INCONNU',
+        numEngin:    row[2] || 'N/A',
+        zone:        row[3] || 'INCONNU',
+        etat:        row[4] || 'INCONNU',
         observation: row[5] || ''
-      })).reverse(); // Most recent first
-      
+      })).reverse();
+
       setHistoryData(mappedHistory);
     } catch (err) {
       console.error(err);
@@ -194,48 +229,51 @@ export default function App() {
     fetchHistory();
   }, []);
 
-  const getStatusType = (status: string): 'active' | 'warning' | 'error' => {
-    const s = status?.toUpperCase() || '';
-    if (s === 'OK' || s.includes('ACTIF')) return 'active';
-    if (s === 'HS' || s.includes('ARRÊTÉ')) return 'error';
-    return 'warning';
-  };
-
+  // ============================================================
+  // SUBMIT (écriture via Apps Script)
+  // ============================================================
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.designation || !form.numEngin) return;
-
     setSubmitting(true);
     try {
       const values = [form.designation, form.numEngin, form.zone, form.etat, form.observation];
-      
       const isEdit = editingRow !== null && editingRow !== -1;
-      const url = isEdit ? `/api/data/${editingRow}` : '/api/data';
-      const method = isEdit ? 'PUT' : 'POST';
 
-      const response = await fetch(url, {
-        method,
+      // Mise à jour ou ajout dans Feuil1
+      await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values })
+        body: JSON.stringify({
+          sheet: 'Feuil1',
+          values,
+          rowIndex: isEdit ? editingRow : null
+        })
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'Submission failed');
-      }
-      
-      // Reset form and refresh
+      // Ajout dans Historique
+      await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sheet: 'Historique',
+          values
+        })
+      });
+
       setForm({ designation: '', numEngin: '', zone: 'PISTE', etat: 'OK', observation: '' });
       setEditingRow(null);
-      await fetchData();
-      await fetchHistory();
+
+      // Attendre 1s que le Sheet se mette à jour avant de re-fetch
+      setTimeout(() => {
+        fetchData();
+        fetchHistory();
+      }, 1000);
+
     } catch (err: any) {
-      const msg = err.message || '';
-      if (msg.includes('PERMISSION_DENIED') || msg.includes('401')) {
-        alert("🔒 ACCÈS REFUSÉ : Pour ENREGISTRER des données, l'application a besoin d'un 'Service Account' Google. \n\n1. Créez un compte de service sur Google Cloud Console.\n2. Partagez votre Google Sheet avec l'email du compte de service.\n3. Copiez le contenu du JSON dans un Secret nommé 'GOOGLE_APPLICATION_CREDENTIALS' dans AI Studio.");
-      } else {
-        alert(`Erreur: ${msg}`);
-      }
+      alert(`Erreur: ${err.message}`);
     } finally {
       setSubmitting(false);
     }
@@ -244,13 +282,12 @@ export default function App() {
   const handleEdit = (item: SheetData) => {
     setForm({
       designation: item.designation,
-      numEngin: item.numEngin,
-      zone: item.zone,
-      etat: item.etat,
+      numEngin:    item.numEngin,
+      zone:        item.zone,
+      etat:        item.etat,
       observation: item.observation
     });
     setEditingRow(item.rowIndex || null);
-    // Optional: Scroll to top or side panel on mobile
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -264,7 +301,6 @@ export default function App() {
     item.numEngin.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Stats Logic
   const stats = useMemo(() => {
     const total = data.length;
     const ok = data.filter(i => i.etat === 'OK').length;
@@ -273,9 +309,7 @@ export default function App() {
     const okPercentage = total > 0 ? Math.round((ok / total) * 100) : 0;
 
     const zoneDetails = data.reduce((acc, item) => {
-      if (!acc[item.zone]) {
-        acc[item.zone] = { total: 0, ok: 0, hs: 0 };
-      }
+      if (!acc[item.zone]) acc[item.zone] = { total: 0, ok: 0, hs: 0 };
       acc[item.zone].total += 1;
       if (item.etat === 'OK') acc[item.zone].ok += 1;
       if (item.etat === 'HS') acc[item.zone].hs += 1;
@@ -285,15 +319,15 @@ export default function App() {
     const zoneDetailedData = Object.entries(zoneDetails).map(([name, counts]: [string, {total: number, ok: number, hs: number}]) => ({
       name,
       total: counts.total,
-      ok: counts.ok,
-      hs: counts.hs,
-      taux: counts.total > 0 ? Math.round((counts.ok / counts.total) * 100) : 0
+      ok:    counts.ok,
+      hs:    counts.hs,
+      taux:  counts.total > 0 ? Math.round((counts.ok / counts.total) * 100) : 0
     }));
 
     const zoneData = zoneDetailedData.map(z => ({ name: z.name, value: z.total }));
     const statusData = [
       { name: 'OPÉRATIONNEL', value: ok, color: '#10b981' },
-      { name: 'HORS SERVICE', value: hs, color: '#f43f5e' }
+      { name: 'HORS SERVICE',  value: hs, color: '#f43f5e' }
     ].filter(d => d.value > 0);
 
     return { total, ok, hs, maintenance, okPercentage, zoneData, statusData, zoneDetailedData };
@@ -394,7 +428,7 @@ export default function App() {
                   <h2 className="font-bold text-sm">Statistiques</h2>
                 </button>
                 <button 
-                  onClick={() => setActiveTab('historique')}
+                  onClick={() => { setActiveTab('historique'); fetchHistory(); }}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all shrink-0 ${activeTab === 'historique' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
                 >
                   <Clock className="w-4 h-4" />
@@ -416,7 +450,7 @@ export default function App() {
                   <button 
                     onClick={() => {
                       setForm({ designation: '', numEngin: '', zone: 'PISTE', etat: 'OK', observation: '' });
-                      setEditingRow(-1); // Use -1 as a flag for "New Item"
+                      setEditingRow(-1);
                     }}
                     className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-md text-xs font-black shadow-md hover:bg-blue-700 transition-all shrink-0"
                   >
@@ -551,7 +585,6 @@ export default function App() {
                           Retour aux cartes
                         </button>
                       </div>
-
                       <div className="flex-grow overflow-auto border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/20">
                         <table className="w-full text-left border-collapse">
                           <thead className="sticky top-0 bg-white dark:bg-slate-900 shadow-sm z-10">
@@ -610,57 +643,55 @@ export default function App() {
                             currentStatus: item.etat
                           };
                         }
-                        const stats = acc[key];
-                        stats.events += 1;
-                        if (item.etat === 'OK') stats.okCount += 1;
-                        if (item.etat === 'HS') stats.hsCount += 1;
+                        const s = acc[key];
+                        s.events += 1;
+                        if (item.etat === 'OK') s.okCount += 1;
+                        if (item.etat === 'HS') s.hsCount += 1;
                         return acc;
                       }, {} as Record<string, any>))
                         .filter((item: any) => 
                           item.designation.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           item.numEngin.toLowerCase().includes(searchTerm.toLowerCase())
                         )
-                        .map((stats: any, idx) => (
+                        .map((s: any, idx) => (
                         <div key={idx} className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl flex flex-col transition-transform hover:scale-[1.02]">
                           <div className="p-4 flex items-start justify-between">
                             <div>
-                              <h3 className="text-white font-black text-sm uppercase tracking-tight">{stats.designation}</h3>
-                              <p className="text-slate-500 text-[10px] font-mono mt-0.5">{stats.numEngin} • {stats.zone}</p>
+                              <h3 className="text-white font-black text-sm uppercase tracking-tight">{s.designation}</h3>
+                              <p className="text-slate-500 text-[10px] font-mono mt-0.5">{s.numEngin} • {s.zone}</p>
                             </div>
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${stats.currentStatus === 'OK' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
-                              • {stats.currentStatus}
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${s.currentStatus === 'OK' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
+                              • {s.currentStatus}
                             </span>
                           </div>
-
                           <div className="grid grid-cols-3 border-y border-slate-800 bg-slate-950/50">
                             <div className="p-4 text-center border-r border-slate-800">
-                              <div className="text-xl font-black text-blue-400 leading-none">{stats.events}</div>
+                              <div className="text-xl font-black text-blue-400 leading-none">{s.events}</div>
                               <div className="text-[8px] font-bold text-slate-500 uppercase mt-1 tracking-tighter">Événements</div>
                             </div>
                             <div className="p-4 text-center border-r border-slate-800">
-                              <div className="text-xl font-black text-emerald-400 leading-none">{stats.okCount}</div>
+                              <div className="text-xl font-black text-emerald-400 leading-none">{s.okCount}</div>
                               <div className="text-[8px] font-bold text-slate-500 uppercase mt-1 tracking-tighter">Retours OK</div>
                             </div>
                             <div className="p-4 text-center">
-                              <div className="text-xl font-black text-rose-400 leading-none">{stats.hsCount}</div>
+                              <div className="text-xl font-black text-rose-400 leading-none">{s.hsCount}</div>
                               <div className="text-[8px] font-bold text-slate-500 uppercase mt-1 tracking-tighter">Pannes HS</div>
                             </div>
                           </div>
-
                           <div className="p-4 bg-slate-900/50 space-y-3">
                             <div className="flex items-center gap-2 text-slate-500 text-[9px] font-bold">
                               <Clock className="w-3 h-3" />
-                              <span>{stats.lastUpdate}</span>
+                              <span>{s.lastUpdate}</span>
                             </div>
-                            <div className={`flex items-center gap-2 text-xs font-black p-2 rounded-lg ${stats.currentStatus === 'OK' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-                              {stats.currentStatus === 'OK' ? (
-                                <><CheckCircle2 className="w-4 h-4" /> <span>RETOUR OPÉRATIONNEL</span></>
+                            <div className={`flex items-center gap-2 text-xs font-black p-2 rounded-lg ${s.currentStatus === 'OK' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                              {s.currentStatus === 'OK' ? (
+                                <><CheckCircle2 className="w-4 h-4" /><span>RETOUR OPÉRATIONNEL</span></>
                               ) : (
-                                <><AlertCircle className="w-4 h-4" /> <span>HORS SERVICE</span></>
+                                <><AlertCircle className="w-4 h-4" /><span>HORS SERVICE</span></>
                               )}
                             </div>
                             <button 
-                              onClick={() => setSelectedHistoryNum(stats.numEngin)}
+                              onClick={() => setSelectedHistoryNum(s.numEngin)}
                               className="w-full py-2.5 mt-2 bg-slate-800 dark:bg-slate-950 text-[10px] font-black text-white hover:bg-slate-700 rounded-lg transition-all flex items-center justify-center gap-2 border border-slate-700"
                             >
                               <FileText className="w-3 h-3" />
@@ -674,7 +705,6 @@ export default function App() {
                 </>
               ) : activeTab === 'dashboard' ? (
                 <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 overflow-y-auto h-full">
-                  {/* Totals Section */}
                   <div className="bg-gradient-to-br from-blue-500 to-blue-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
                     <div className="flex items-center justify-between opacity-80">
                       <span className="text-xs font-black uppercase tracking-widest">Total Engins</span>
@@ -685,7 +715,6 @@ export default function App() {
                       <p className="text-[10px] font-bold opacity-70 italic">Parc total répertorié</p>
                     </div>
                   </div>
-
                   <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
                     <div className="flex items-center justify-between opacity-80">
                       <span className="text-xs font-black uppercase tracking-widest">Opérationnels</span>
@@ -699,7 +728,6 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-
                   <div className="bg-gradient-to-br from-rose-500 to-rose-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
                     <div className="flex items-center justify-between opacity-80">
                       <span className="text-xs font-black uppercase tracking-widest">Hors Service</span>
@@ -710,7 +738,6 @@ export default function App() {
                       <p className="text-[10px] font-bold opacity-70 italic">Nécessitent intervention</p>
                     </div>
                   </div>
-
                   <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl flex flex-col justify-between">
                     <div className="flex items-center justify-between text-slate-400">
                       <span className="text-xs font-black uppercase tracking-widest">Temps Moyen Synchro</span>
@@ -721,8 +748,6 @@ export default function App() {
                       <p className="text-[10px] font-bold text-slate-400 italic font-mono uppercase">API V4 LATENCY</p>
                     </div>
                   </div>
-
-                  {/* Zone Breakdown */}
                   <div className="col-span-full mt-4">
                     <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 pl-1">Répartition par Zone</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -742,7 +767,6 @@ export default function App() {
                 </div>
               ) : activeTab === 'stats' ? (
                 <div className="p-8 overflow-y-auto h-full space-y-8 bg-slate-50 dark:bg-slate-900/30">
-                  {/* Stats Top Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
                       <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">TOTAL ENGINS</div>
@@ -761,38 +785,23 @@ export default function App() {
                       <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400 uppercase leading-none">{stats.okPercentage}%</div>
                     </div>
                   </div>
-
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Charts Section */}
                     <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col h-[400px] shadow-sm">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6">OK vs HS</h3>
                       <div className="flex-grow">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
-                            <Pie
-                              data={stats.statusData}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={60}
-                              outerRadius={100}
-                              paddingAngle={5}
-                              dataKey="value"
-                              stroke="none"
-                              label={({ name, value }) => `${name}: ${value}`}
-                            >
+                            <Pie data={stats.statusData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value" stroke="none" label={({ name, value }) => `${name}: ${value}`}>
                               {stats.statusData.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.color} />
                               ))}
                             </Pie>
-                            <Tooltip 
-                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
-                            />
+                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }} />
                             <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} verticalAlign="bottom" height={36}/>
                           </PieChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
-
                     <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col h-[400px] shadow-sm">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6">Détail par Zone</h3>
                       <div className="flex-grow">
@@ -814,8 +823,6 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Summary Table */}
                   <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
                     <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
                       <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Résumé Détaillé par Zone</h3>
@@ -865,7 +872,6 @@ export default function App() {
         {/* Sidebar */}
         {editingRow !== null && (
           <aside className="lg:col-span-4 flex flex-col gap-6 overflow-y-auto pr-1 animate-in slide-in-from-right duration-300">
-            {/* Form Card */}
             <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-2xl border-l-4 border-l-blue-600 space-y-6 relative">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
@@ -874,138 +880,119 @@ export default function App() {
                     {editingRow === -1 ? "Rapport d'État Engin" : "Modification Engin"}
                   </h2>
                 </div>
-                <button 
-                  onClick={handleCancelEdit}
-                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-rose-500"
-                  title="Fermer"
-                >
+                <button onClick={handleCancelEdit} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-rose-500" title="Fermer">
                   <RefreshCw className="w-4 h-4 rotate-45" />
                 </button>
               </div>
               
               <form className="space-y-5" onSubmit={handleSubmit}>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center justify-between">
-                  Désignation de l'engin
-                  <span className="text-rose-500 opacity-50">*</span>
-                </label>
-                <input 
-                  type="text" 
-                  list="designations"
-                  value={form.designation}
-                  onChange={e => setForm({...form, designation: e.target.value.toUpperCase()})}
-                  required
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500 dark:text-white text-sm shadow-inner font-bold" 
-                  placeholder="EX: TRACTEUR AVION" 
-                />
-                <datalist id="designations">
-                  {suggestions.map(s => <option key={s} value={s} />)}
-                </datalist>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center justify-between">
-                    N° Engin
+                    Désignation de l'engin
                     <span className="text-rose-500 opacity-50">*</span>
                   </label>
                   <input 
-                    type="text" 
-                    value={form.numEngin}
-                    onChange={e => setForm({...form, numEngin: e.target.value})}
+                    type="text" list="designations"
+                    value={form.designation}
+                    onChange={e => setForm({...form, designation: e.target.value.toUpperCase()})}
                     required
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none dark:text-white text-sm font-semibold shadow-inner" 
-                    placeholder="Ex: 6692" 
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500 dark:text-white text-sm shadow-inner font-bold" 
+                    placeholder="EX: TRACTEUR AVION" 
                   />
+                  <datalist id="designations">
+                    {suggestions.map(s => <option key={s} value={s} />)}
+                  </datalist>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                      N° Engin <span className="text-rose-500 opacity-50">*</span>
+                    </label>
+                    <input 
+                      type="text" value={form.numEngin}
+                      onChange={e => setForm({...form, numEngin: e.target.value})}
+                      required
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none dark:text-white text-sm font-semibold shadow-inner" 
+                      placeholder="Ex: 6692" 
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">État</label>
+                    <select 
+                      value={form.etat} onChange={e => setForm({...form, etat: e.target.value})}
+                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none appearance-none cursor-pointer dark:text-white text-sm font-medium shadow-inner"
+                    >
+                      <option value="OK">FONCTIONNEL (OK)</option>
+                      <option value="HS">HORS-SERVICE (HS)</option>
+                    </select>
+                  </div>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">État</label>
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Zone d'Affectation</label>
                   <select 
-                    value={form.etat}
-                    onChange={e => setForm({...form, etat: e.target.value})}
+                    value={form.zone} onChange={e => setForm({...form, zone: e.target.value})}
                     className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none appearance-none cursor-pointer dark:text-white text-sm font-medium shadow-inner"
                   >
-                    <option value="OK">FONCTIONNEL (OK)</option>
-                    <option value="HS">HORS-SERVICE (HS)</option>
+                    <option value="PISTE">PISTE</option>
+                    <option value="GSE">GSE</option>
+                    <option value="ANTENNE PISTE">ANTENNE PISTE</option>
                   </select>
                 </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Zone d'Affectation</label>
-                <select 
-                  value={form.zone}
-                  onChange={e => setForm({...form, zone: e.target.value})}
-                  className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none appearance-none cursor-pointer dark:text-white text-sm font-medium shadow-inner"
-                >
-                  <option value="PISTE">PISTE</option>
-                  <option value="GSE">GSE</option>
-                  <option value="ANTENNE PISTE">ANTENNE PISTE</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Observations / Défauts</label>
-                <textarea 
-                  rows={3} 
-                  value={form.observation}
-                  onChange={e => setForm({...form, observation: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none resize-none dark:text-white text-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-inner" 
-                  placeholder="Précisez le problème technique..."
-                ></textarea>
-              </div>
-
-              <button 
-                type="submit" 
-                disabled={submitting || !form.designation || !form.numEngin}
-                className={`w-full font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-3 shadow-xl text-sm group relative overflow-hidden active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${
-                  editingRow 
-                    ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/20' 
-                    : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20'
-                }`}
-              >
-                {submitting ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <>
-                    {editingRow ? <Edit3 className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5 group-hover:scale-110 transition-transform" />}
-                    <span>{editingRow ? "Mettre à jour l'engin" : "Enregistrer dans le Sheet"}</span>
-                  </>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite] pointer-events-none" />
-              </button>
-            </form>
-          </div>
-
-          {/* Guide Card */}
-          <div className="bg-slate-900 rounded-xl p-5 text-white relative overflow-hidden group border border-slate-800 transition-colors">
-            <div className="absolute -top-6 -right-6 p-4 opacity-5 group-hover:opacity-10 transition-opacity scale-150">
-              <Database className="w-24 h-24" />
-            </div>
-            <div className="flex items-center gap-3 mb-4 relative z-10">
-              <div className="bg-blue-500/20 p-2 rounded-lg border border-blue-400/20 shadow-inner">
-                <Info className="w-4 h-4 text-blue-400" />
-              </div>
-              <span className="text-sm font-black uppercase tracking-wider">Note Opérationnelle</span>
-            </div>
-            <div className="space-y-3 relative z-10">
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Ce rapport met à jour la flotte en temps réel sur le document partagé. 
-                Toutes les entrées sont historisées pour la maintenance préventive.
-              </p>
-              <div className="pt-2 border-t border-slate-800 flex items-center gap-3">
-                <div className="flex -space-x-2">
-                  <div className="w-6 h-6 rounded-full bg-blue-600 border-2 border-slate-900 flex items-center justify-center text-[8px] font-bold">G1</div>
-                  <div className="w-6 h-6 rounded-full bg-emerald-600 border-2 border-slate-900 flex items-center justify-center text-[8px] font-bold">S2</div>
-                  <div className="w-6 h-6 rounded-full bg-indigo-600 border-2 border-slate-900 flex items-center justify-center text-[8px] font-bold">E3</div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Observations / Défauts</label>
+                  <textarea 
+                    rows={3} value={form.observation}
+                    onChange={e => setForm({...form, observation: e.target.value})}
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none resize-none dark:text-white text-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-inner" 
+                    placeholder="Précisez le problème technique..."
+                  />
                 </div>
-                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Système GSE-HUB V3</span>
+                <button 
+                  type="submit" 
+                  disabled={submitting || !form.designation || !form.numEngin}
+                  className={`w-full font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-3 shadow-xl text-sm group relative overflow-hidden active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${
+                    editingRow && editingRow !== -1
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/20' 
+                      : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20'
+                  }`}
+                >
+                  {submitting ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      {editingRow && editingRow !== -1 ? <Edit3 className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                      <span>{editingRow && editingRow !== -1 ? "Mettre à jour l'engin" : "Enregistrer dans le Sheet"}</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-slate-900 rounded-xl p-5 text-white relative overflow-hidden group border border-slate-800 transition-colors">
+              <div className="flex items-center gap-3 mb-4 relative z-10">
+                <div className="bg-blue-500/20 p-2 rounded-lg border border-blue-400/20 shadow-inner">
+                  <Info className="w-4 h-4 text-blue-400" />
+                </div>
+                <span className="text-sm font-black uppercase tracking-wider">Note Opérationnelle</span>
+              </div>
+              <div className="space-y-3 relative z-10">
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Ce rapport met à jour la flotte en temps réel sur le document partagé. 
+                  Toutes les entrées sont historisées pour la maintenance préventive.
+                </p>
+                <div className="pt-2 border-t border-slate-800 flex items-center gap-3">
+                  <div className="flex -space-x-2">
+                    <div className="w-6 h-6 rounded-full bg-blue-600 border-2 border-slate-900 flex items-center justify-center text-[8px] font-bold">G1</div>
+                    <div className="w-6 h-6 rounded-full bg-emerald-600 border-2 border-slate-900 flex items-center justify-center text-[8px] font-bold">S2</div>
+                    <div className="w-6 h-6 rounded-full bg-indigo-600 border-2 border-slate-900 flex items-center justify-center text-[8px] font-bold">E3</div>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Système GSE-HUB V3</span>
+                </div>
               </div>
             </div>
-          </div>
-        </aside>
-      )}
-    </main>
+          </aside>
+        )}
+      </main>
 
       {/* Password Modal */}
       {showPasswordModal && (
@@ -1022,22 +1009,18 @@ export default function App() {
               <h3 className="text-xl font-bold text-slate-800 dark:text-white">Accès Administration</h3>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Entrez votre code (IRATIB)</p>
             </div>
-
             <div className="space-y-4">
               <input 
-                type="password"
-                value={passwordInput}
+                type="password" value={passwordInput}
                 onChange={e => setPasswordInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && verifyPassword()}
-                autoFocus
-                placeholder="••••"
-                className={`w-full text-center text-2xl tracking-[1em] font-black px-4 py-3 bg-slate-50 dark:bg-slate-800 border ${passwordError ? 'border-rose-500 animate-shake' : 'border-slate-200 dark:border-slate-700'} rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all`}
+                autoFocus placeholder="••••"
+                className={`w-full text-center text-2xl tracking-[1em] font-black px-4 py-3 bg-slate-50 dark:bg-slate-800 border ${passwordError ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'} rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all`}
               />
               {passwordError && (
                 <p className="text-[10px] font-black text-rose-500 text-center uppercase tracking-widest">Code incorrect</p>
               )}
             </div>
-
             <div className="flex gap-3 pt-2">
               <button 
                 onClick={() => setShowPasswordModal(false)}
