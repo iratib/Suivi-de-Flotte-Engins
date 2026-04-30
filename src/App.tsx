@@ -49,7 +49,8 @@ const URL_FLOTTE = () => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gvi
 const URL_HISTORY = () => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique&t=${Date.now()}`;
 
 // Apps Script URL pour l'écriture — remplace par ton URL après déploiement Apps Script
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbydTwPMBn-AuykxZl7fY2w1v-62bMwvonZobY3bMnbyVux2IU-DIKmKLNPU86kz9gYw/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw2TbZCa0ebjwKpzpaQDux83r78o_WpQD24Hazx3NdugScYR01Y18aAokwRHllJ57dS/exec  
+';
 // ============================================================
 
 interface SheetData {
