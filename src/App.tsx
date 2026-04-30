@@ -350,7 +350,7 @@ export default function App() {
       <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 shrink-0 shadow-sm z-10 transition-colors duration-300">
         <div className="flex items-center gap-3">
           <img 
-            src="/images/logo.png" 
+            src="./images/logo.png" 
             alt="Suivi de Flotte Engins" 
             className="w-10 h-10 rounded-lg shadow-md shadow-blue-500/20 object-contain bg-white/20 p-1"
           />
