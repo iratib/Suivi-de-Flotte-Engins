@@ -77,12 +77,23 @@ const parseGviz = (text: string): string[][] => {
     const json = JSON.parse(text.substring(47, text.length - 2));
     return (json.table.rows || []).map((row: any) =>
       (row.c || []).map((cell: any) => {
-        if (cell === null || cell === undefined) return '';
-        return cell.v !== null && cell.v !== undefined ? cell.v.toString() : '';
+        if (cell === null || cell === undefined) return "";
+        if (cell.v === null || cell.v === undefined) return "";
+        // Gestion des dates au format Date(yyyy,m,d,h,min,s)
+        const dateMatch = String(cell.v).match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)$/);
+        if (dateMatch) {
+          const [, y, m, d, h, min] = dateMatch;
+          const dd = String(d).padStart(2, "0");
+          const mm = String(Number(m) + 1).padStart(2, "0");
+          const hh = String(h || 0).padStart(2, "0");
+          const mi = String(min || 0).padStart(2, "0");
+          return `${dd}/${mm}/${y} ${hh}:${mi}`;
+        }
+        return cell.v.toString();
       })
     );
   } catch (e) {
-    console.error('parseGviz error:', e);
+    console.error("parseGviz error:", e);
     return [];
   }
 };
