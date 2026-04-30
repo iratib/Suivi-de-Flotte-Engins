@@ -45,13 +45,11 @@ import {
 // CONFIGURATION GOOGLE SHEETS
 // ============================================================
 const SHEET_ID = '1qMgsmIERDsUTfiYhyaDr3YPuXN7eJV0tlwHK1WhTIYI';
-const URL_FLOTTE = () => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Feuille 1&t=${Date.now()}`;
-const URL_HISTORY = () => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique&t=${Date.now()}`;
+const URL_FLOTTE   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Feuil1`;
+const URL_HISTORY  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique`;
 
 // Apps Script URL pour l'écriture — remplace par ton URL après déploiement Apps Script
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw2TbZCa0ebjwKpzpaQDux83r78o_WpQD24Hazx3NdugScYR01Y18aAokwRHllJ57dS/exec 
-  
-';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw2TbZCa0ebjwKpzpaQDux83r78o_WpQD24Hazx3NdugScYR01Y18aAokwRHllJ57dS/exec';
 // ============================================================
 
 interface SheetData {
@@ -79,23 +77,12 @@ const parseGviz = (text: string): string[][] => {
     const json = JSON.parse(text.substring(47, text.length - 2));
     return (json.table.rows || []).map((row: any) =>
       (row.c || []).map((cell: any) => {
-        if (cell === null || cell === undefined) return "";
-        if (cell.v === null || cell.v === undefined) return "";
-        // Gestion des dates au format Date(yyyy,m,d,h,min,s)
-        const dateMatch = String(cell.v).match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)$/);
-        if (dateMatch) {
-          const [, y, m, d, h, min] = dateMatch;
-          const dd = String(d).padStart(2, "0");
-          const mm = String(Number(m) + 1).padStart(2, "0");
-          const hh = String(h || 0).padStart(2, "0");
-          const mi = String(min || 0).padStart(2, "0");
-          return `${dd}/${mm}/${y} ${hh}:${mi}`;
-        }
-        return cell.v.toString();
+        if (cell === null || cell === undefined) return '';
+        return cell.v !== null && cell.v !== undefined ? cell.v.toString() : '';
       })
     );
   } catch (e) {
-    console.error("parseGviz error:", e);
+    console.error('parseGviz error:', e);
     return [];
   }
 };
@@ -184,7 +171,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(URL_FLOTTE());
+      const response = await fetch(URL_FLOTTE);
       if (!response.ok) throw new Error('Failed to fetch');
       const text = await response.text();
       const rows = parseGviz(text);
@@ -215,7 +202,7 @@ export default function App() {
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      const response = await fetch(URL_HISTORY());
+      const response = await fetch(URL_HISTORY);
       if (!response.ok) throw new Error('Failed to fetch history');
       const text = await response.text();
       const rows = parseGviz(text);
@@ -352,7 +339,7 @@ export default function App() {
       <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 shrink-0 shadow-sm z-10 transition-colors duration-300">
         <div className="flex items-center gap-3">
           <img 
-            src="./images/logo.png" 
+            src="/images/logo.png" 
             alt="Suivi de Flotte Engins" 
             className="w-10 h-10 rounded-lg shadow-md shadow-blue-500/20 object-contain bg-white/20 p-1"
           />
