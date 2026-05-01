@@ -23,7 +23,13 @@ import {
   LayoutDashboard,
   BarChart3,
   Lock,
-  Trash2
+  Trash2,
+  Users,
+  LogOut,
+  UserPlus,
+  ShieldCheck,
+  Sunrise,
+  Moon as MoonIcon
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useRef, FormEvent } from 'react';
 import { motion } from 'motion/react';
@@ -89,6 +95,15 @@ const formatDate = (value: string): string => {
   return value.replace(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}):\d{2}/, '$1');
 };
 
+interface ActiveSession {
+  sessionId: string;
+  name: string;
+  role: 'admin' | 'editor';
+  shift: 'Journée' | 'Nuit';
+  date: string;
+  loginTime: string;
+}
+
 // Parse la réponse gviz/tq de Google Sheets
 const parseGviz = (text: string): string[][] => {
   try {
@@ -109,7 +124,7 @@ export default function App() {
   const statutOverrides = useRef<Map<number, string>>(new Map());
   const [data, setData] = useState<SheetData[]>([]);
   const [historyData, setHistoryData] = useState<HistoryItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'flotte' | 'historique' | 'dashboard' | 'stats' | 'outofparc'>('flotte');
+  const [activeTab, setActiveTab] = useState<'flotte' | 'historique' | 'dashboard' | 'stats' | 'outofparc'>('dashboard');
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,30 +145,167 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
 
+  const todayISO = new Date().toISOString().split('T')[0];
+
+  // ── Session multi-utilisateurs ───────────────────────────────────────────
+  const mySessionIdRef = useRef<string | null>(sessionStorage.getItem('mySessionId'));
+  const bcRef = useRef<BroadcastChannel | null>(null);
+
+  const getSessions = (): ActiveSession[] => {
+    try { return JSON.parse(localStorage.getItem('activeSessions') || '[]'); } catch { return []; }
+  };
+
+  // Initialisé directement depuis localStorage pour éviter le flash vide
+  const [mySession, setMySession] = useState<ActiveSession | null>(() => {
+    const sid = sessionStorage.getItem('mySessionId');
+    if (!sid) return null;
+    return getSessions().find(s => s.sessionId === sid) ?? null;
+  });
+  const [allSessions, setAllSessions] = useState<ActiveSession[]>(() => getSessions());
+
+  const refreshSessions = () => setAllSessions(getSessions());
+
+  const persistSessions = (sessions: ActiveSession[]) => {
+    localStorage.setItem('activeSessions', JSON.stringify(sessions));
+    setAllSessions([...sessions]);
+    // Notifier tous les autres onglets via BroadcastChannel (fiable) ET storage event (fallback)
+    bcRef.current?.postMessage({ type: 'sessions_updated' });
+  };
+  const addSession = (session: ActiveSession) => {
+    persistSessions([...getSessions().filter(s => s.sessionId !== session.sessionId), session]);
+  };
+  const removeSession = (sessionId: string) => {
+    persistSessions(getSessions().filter(s => s.sessionId !== sessionId));
+  };
+  const generateSessionId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+  // ── Fin session ──────────────────────────────────────────────────────────
+
+  const [editorUsers, setEditorUsers] = useState<Array<{ id: string; password: string }>>(() => {
+    try { return JSON.parse(localStorage.getItem('editorUsers') || '[]'); } catch { return []; }
+  });
+
+  const [showSessionModal, setShowSessionModal] = useState(false);
+  const [sessionForm, setSessionForm] = useState<{ shift: 'Journée' | 'Nuit'; date: string }>({ shift: 'Journée', date: todayISO });
+
+  const [showEditorLoginModal, setShowEditorLoginModal] = useState(false);
+  const [editorLoginForm, setEditorLoginForm] = useState<{ id: string; password: string; shift: 'Journée' | 'Nuit'; date: string }>({ id: '', password: '', shift: 'Journée', date: todayISO });
+  const [editorLoginError, setEditorLoginError] = useState('');
+
+  const [showUserManagementModal, setShowUserManagementModal] = useState(false);
+  const [newEditorForm, setNewEditorForm] = useState({ id: '', password: '', confirmPassword: '' });
+  const [newEditorError, setNewEditorError] = useState('');
+
+  const formatDisplayDate = (d: string) => { if (!d) return ''; const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; };
+
   const suggestions = useMemo(() => {
     const unique = new Set(data.map(item => item.designation.toUpperCase()));
     return Array.from(unique).sort();
   }, [data]);
 
-  const handleRoleSwitch = (role: 'admin' | 'viewer') => {
+  const handleRoleSwitch = (role: 'admin' | 'editor' | 'viewer') => {
     if (role === 'viewer') {
+      if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
+      sessionStorage.removeItem('mySessionId');
+      mySessionIdRef.current = null;
+      setMySession(null);
       setUserRole('viewer');
       setEditingRow(null);
-    } else {
+    } else if (role === 'admin') {
       setShowPasswordModal(true);
       setPasswordError(false);
       setPasswordInput('');
+    } else {
+      setEditorLoginForm({ id: '', password: '', shift: 'Journée', date: todayISO });
+      setEditorLoginError('');
+      setShowEditorLoginModal(true);
     }
   };
 
   const verifyPassword = () => {
     if (passwordInput === 'IRATIB') {
-      setUserRole('admin');
       setShowPasswordModal(false);
       setPasswordInput('');
+      setSessionForm({ shift: 'Journée', date: todayISO });
+      setShowSessionModal(true);
     } else {
       setPasswordError(true);
     }
+  };
+
+  const handleAdminSessionSubmit = () => {
+    const sessionId = generateSessionId();
+    const session: ActiveSession = {
+      sessionId,
+      name: 'Administrateur',
+      role: 'admin',
+      shift: sessionForm.shift,
+      date: sessionForm.date,
+      loginTime: new Date().toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    };
+    if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
+    sessionStorage.setItem('mySessionId', sessionId);
+    mySessionIdRef.current = sessionId;
+    addSession(session);
+    setMySession(session);
+    setUserRole('admin');
+    setShowSessionModal(false);
+  };
+
+  const handleEditorLogin = () => {
+    const user = editorUsers.find(u => u.id === editorLoginForm.id && u.password === editorLoginForm.password);
+    if (user) {
+      const sessionId = generateSessionId();
+      const session: ActiveSession = {
+        sessionId,
+        name: editorLoginForm.id,
+        role: 'editor',
+        shift: editorLoginForm.shift,
+        date: editorLoginForm.date,
+        loginTime: new Date().toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+      };
+      if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
+      sessionStorage.setItem('mySessionId', sessionId);
+      mySessionIdRef.current = sessionId;
+      addSession(session);
+      setMySession(session);
+      setUserRole('admin');
+      setShowEditorLoginModal(false);
+      setEditorLoginError('');
+    } else {
+      setEditorLoginError('Identifiant ou mot de passe incorrect');
+    }
+  };
+
+  const handleLogout = () => {
+    if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
+    sessionStorage.removeItem('mySessionId');
+    mySessionIdRef.current = null;
+    setMySession(null);
+    setUserRole('viewer');
+    setEditingRow(null);
+  };
+
+  const handleKickSession = (sessionId: string) => {
+    if (!confirm('Forcer la déconnexion de cette session ?')) return;
+    removeSession(sessionId);
+  };
+
+  const handleAddEditor = () => {
+    if (!newEditorForm.id.trim() || !newEditorForm.password.trim()) { setNewEditorError('Tous les champs sont obligatoires'); return; }
+    if (newEditorForm.password !== newEditorForm.confirmPassword) { setNewEditorError('Les mots de passe ne correspondent pas'); return; }
+    if (editorUsers.find(u => u.id.toLowerCase() === newEditorForm.id.toLowerCase())) { setNewEditorError('Cet identifiant existe déjà'); return; }
+    const updated = [...editorUsers, { id: newEditorForm.id, password: newEditorForm.password }];
+    setEditorUsers(updated);
+    localStorage.setItem('editorUsers', JSON.stringify(updated));
+    setNewEditorForm({ id: '', password: '', confirmPassword: '' });
+    setNewEditorError('');
+  };
+
+  const handleRemoveEditor = (id: string) => {
+    if (!confirm(`Supprimer l'éditeur "${id}" ?`)) return;
+    const updated = editorUsers.filter(u => u.id !== id);
+    setEditorUsers(updated);
+    localStorage.setItem('editorUsers', JSON.stringify(updated));
   };
 
   useEffect(() => {
@@ -167,6 +319,42 @@ export default function App() {
       localStorage.setItem('darkMode', 'false');
     }
   }, [isDarkMode]);
+
+  // Restaurer la session + ouvrir le canal inter-onglets
+  useEffect(() => {
+    // Restaurer ma session si l'onglet est rechargé
+    const sid = sessionStorage.getItem('mySessionId');
+    if (sid) {
+      const session = getSessions().find(s => s.sessionId === sid);
+      if (session) { setMySession(session); setUserRole('admin'); mySessionIdRef.current = sid; }
+      else { sessionStorage.removeItem('mySessionId'); }
+    }
+    // BroadcastChannel : canal dédié inter-onglets, plus fiable que storage events
+    if ('BroadcastChannel' in window) {
+      bcRef.current = new BroadcastChannel('fleet_sessions');
+      bcRef.current.onmessage = () => refreshSessions();
+    }
+    // storage event comme fallback (certains navigateurs bloquent BroadcastChannel)
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'activeSessions') refreshSessions();
+    };
+    window.addEventListener('storage', onStorage);
+    // Rafraîchissement périodique toutes les 5 s (filet de sécurité)
+    const interval = setInterval(refreshSessions, 5000);
+
+    return () => {
+      bcRef.current?.close();
+      window.removeEventListener('storage', onStorage);
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Nettoyer la session de cet onglet à la fermeture
+  useEffect(() => {
+    const cleanup = () => { if (mySessionIdRef.current) removeSession(mySessionIdRef.current); };
+    window.addEventListener('beforeunload', cleanup);
+    return () => window.removeEventListener('beforeunload', cleanup);
+  }, []);
 
   const [form, setForm] = useState({
     designation: '',
@@ -379,7 +567,26 @@ export default function App() {
       { name: 'HORS SERVICE',  value: hs, color: '#f43f5e' }
     ].filter(d => d.value > 0);
 
-    return { total, ok, hs, maintenance, okPercentage, zoneData, statusData, zoneDetailedData };
+    const typeDetails = active.reduce((acc, item) => {
+      const type = item.designation.toUpperCase();
+      if (!acc[type]) acc[type] = { total: 0, ok: 0, hs: 0 };
+      acc[type].total += 1;
+      if (item.etat === 'OK') acc[type].ok += 1;
+      if (item.etat === 'HS') acc[type].hs += 1;
+      return acc;
+    }, {} as Record<string, { total: number, ok: number, hs: number }>);
+
+    const typeDetailedData = Object.entries(typeDetails)
+      .map(([name, counts]: [string, { total: number, ok: number, hs: number }]) => ({
+        name,
+        total: counts.total,
+        ok:    counts.ok,
+        hs:    counts.hs,
+        taux:  counts.total > 0 ? Math.round((counts.ok / counts.total) * 100) : 0
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    return { total, ok, hs, maintenance, okPercentage, zoneData, statusData, zoneDetailedData, typeDetailedData };
   }, [data]);
 
   return (
@@ -408,42 +615,84 @@ export default function App() {
             </span>
           </div>
           
-          <div className="flex items-center gap-4 border-l border-slate-200 dark:border-slate-800 pl-6">
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
-              <button 
-                onClick={() => handleRoleSwitch('admin')}
-                className={`px-3 py-1 text-[10px] font-black rounded-md transition-all ${userRole === 'admin' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600'}`}
-              >
-                ADMIN
-              </button>
-              <button 
-                onClick={() => handleRoleSwitch('viewer')}
-                className={`px-3 py-1 text-[10px] font-black rounded-md transition-all ${userRole === 'viewer' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600'}`}
-              >
-                LECTURE
-              </button>
-            </div>
-            <button 
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-              title={isDarkMode ? "Passer au mode clair" : "Passer au mode sombre"}
-            >
-              {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            <button 
-              onClick={fetchData}
-              className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-              title="Rafraîchir les données"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-            <div className="text-right hidden md:block">
-              <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Agent GSE</p>
-              <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500">Opérations Piste</p>
-            </div>
-            <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-xs font-bold text-slate-700 dark:text-slate-300 shadow-inner">
-              <User className="w-4 h-4" />
-            </div>
+          <div className="flex items-center gap-3 border-l border-slate-200 dark:border-slate-800 pl-6">
+            {mySession ? (
+              <>
+                {/* Connected user info */}
+                <div className="hidden md:flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black border ${mySession.shift === 'Journée' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/30' : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/30'}`}>
+                    {mySession.shift === 'Journée' ? <Sunrise className="w-2.5 h-2.5 inline mr-0.5" /> : <MoonIcon className="w-2.5 h-2.5 inline mr-0.5" />}
+                    {mySession.shift}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{formatDisplayDate(mySession.date)}</span>
+                </div>
+                {mySession.role === 'admin' && (
+                  <button onClick={() => { setNewEditorForm({ id: '', password: '', confirmPassword: '' }); setNewEditorError(''); setShowUserManagementModal(true); }}
+                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-lg transition-all"
+                    title="Gérer les utilisateurs">
+                    <Users className="w-4 h-4" />
+                  </button>
+                )}
+                <button onClick={() => setIsDarkMode(!isDarkMode)}
+                  className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                  title={isDarkMode ? "Mode clair" : "Mode sombre"}>
+                  {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </button>
+                <button onClick={fetchData}
+                  className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                  title="Rafraîchir">
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+                <div className="text-right hidden md:block">
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{mySession.name}</p>
+                  <p className={`text-[10px] font-black uppercase tracking-wide ${mySession.role === 'admin' ? 'text-blue-500' : 'text-violet-500'}`}>
+                    {mySession.role === 'admin' ? 'Administrateur' : 'Éditeur'}
+                  </p>
+                </div>
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black text-white shadow-inner ${mySession.role === 'admin' ? 'bg-blue-600' : 'bg-violet-600'}`}>
+                  {mySession.name[0].toUpperCase()}
+                </div>
+                <button onClick={handleLogout}
+                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
+                  title="Se déconnecter">
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                  <button onClick={() => handleRoleSwitch('admin')}
+                    className="px-3 py-1 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-blue-600 hover:bg-white dark:hover:bg-slate-700">
+                    ADMIN
+                  </button>
+                  <button onClick={() => handleRoleSwitch('editor')}
+                    className="px-3 py-1 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-violet-600 hover:bg-white dark:hover:bg-slate-700">
+                    ÉDITEUR
+                  </button>
+                  <button onClick={() => handleRoleSwitch('viewer')}
+                    className="px-3 py-1 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-slate-600 hover:bg-white dark:hover:bg-slate-700">
+                    LECTURE
+                  </button>
+                </div>
+                <button onClick={() => setIsDarkMode(!isDarkMode)}
+                  className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                  title={isDarkMode ? "Mode clair" : "Mode sombre"}>
+                  {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </button>
+                <button onClick={fetchData}
+                  className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                  title="Rafraîchir">
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+                <div className="text-right hidden md:block">
+                  <p className="text-xs font-bold text-slate-400 dark:text-slate-500">Non connecté</p>
+                  <p className="text-[10px] font-medium text-slate-300 dark:text-slate-600">Mode lecture</p>
+                </div>
+                <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shadow-inner">
+                  <User className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -772,51 +1021,56 @@ export default function App() {
                   )}
                 </>
               ) : activeTab === 'dashboard' ? (
-                <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 overflow-y-auto h-full">
-                  <div className="bg-gradient-to-br from-blue-500 to-blue-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
-                    <div className="flex items-center justify-between opacity-80">
-                      <span className="text-xs font-black uppercase tracking-widest">Total Engins</span>
-                      <Database className="w-5 h-5" />
+                <div className="p-8 overflow-y-auto h-full space-y-8">
+                  {/* KPI Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="bg-gradient-to-br from-blue-500 to-blue-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
+                      <div className="flex items-center justify-between opacity-80">
+                        <span className="text-xs font-black uppercase tracking-widest">Total Engins</span>
+                        <Database className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black mb-1">{stats.total}</div>
+                        <p className="text-[10px] font-bold opacity-70 italic">Parc total répertorié</p>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-4xl font-black mb-1">{stats.total}</div>
-                      <p className="text-[10px] font-bold opacity-70 italic">Parc total répertorié</p>
+                    <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
+                      <div className="flex items-center justify-between opacity-80">
+                        <span className="text-xs font-black uppercase tracking-widest">Opérationnels</span>
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black mb-1">{stats.ok}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-black">{stats.okPercentage}%</span>
+                          <p className="text-[10px] font-bold opacity-70 italic">Disponibilité totale</p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
-                    <div className="flex items-center justify-between opacity-80">
-                      <span className="text-xs font-black uppercase tracking-widest">Opérationnels</span>
-                      <CheckCircle2 className="w-5 h-5" />
+                    <div className="bg-gradient-to-br from-rose-500 to-rose-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
+                      <div className="flex items-center justify-between opacity-80">
+                        <span className="text-xs font-black uppercase tracking-widest">Hors Service</span>
+                        <AlertCircle className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black mb-1">{stats.hs}</div>
+                        <p className="text-[10px] font-bold opacity-70 italic">Nécessitent intervention</p>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-4xl font-black mb-1">{stats.ok}</div>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-black">{stats.okPercentage}%</span>
-                        <p className="text-[10px] font-bold opacity-70 italic">Disponibilité totale</p>
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="text-xs font-black uppercase tracking-widest">Temps Moyen Synchro</span>
+                        <RefreshCw className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-2xl font-black text-slate-800 dark:text-white mb-1">0.4s</div>
+                        <p className="text-[10px] font-bold text-slate-400 italic font-mono uppercase">API V4 LATENCY</p>
                       </div>
                     </div>
                   </div>
-                  <div className="bg-gradient-to-br from-rose-500 to-rose-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
-                    <div className="flex items-center justify-between opacity-80">
-                      <span className="text-xs font-black uppercase tracking-widest">Hors Service</span>
-                      <AlertCircle className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-4xl font-black mb-1">{stats.hs}</div>
-                      <p className="text-[10px] font-bold opacity-70 italic">Nécessitent intervention</p>
-                    </div>
-                  </div>
-                  <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl flex flex-col justify-between">
-                    <div className="flex items-center justify-between text-slate-400">
-                      <span className="text-xs font-black uppercase tracking-widest">Temps Moyen Synchro</span>
-                      <RefreshCw className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-2xl font-black text-slate-800 dark:text-white mb-1">0.4s</div>
-                      <p className="text-[10px] font-bold text-slate-400 italic font-mono uppercase">API V4 LATENCY</p>
-                    </div>
-                  </div>
-                  <div className="col-span-full mt-4">
+
+                  {/* Zone section */}
+                  <div>
                     <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 pl-1">Répartition par Zone</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       {stats.zoneData.map((zone, i) => (
@@ -830,6 +1084,137 @@ export default function App() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  </div>
+
+                  {/* Sessions Actives — visible Admin uniquement */}
+                  {mySession?.role === 'admin' && (
+                    <div>
+                      <div className="flex items-center justify-between mb-4 pl-1">
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Sessions Actives</h3>
+                        <div className="flex items-center gap-2">
+                          <button onClick={refreshSessions} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md transition-all text-slate-400 hover:text-blue-500" title="Rafraîchir">
+                            <RefreshCw className="w-3 h-3" />
+                          </button>
+                          {/* Alerte conflit de shift */}
+                          {(() => {
+                            const journee = allSessions.filter(s => s.role === 'editor' && s.shift === 'Journée');
+                            const nuit = allSessions.filter(s => s.role === 'editor' && s.shift === 'Nuit');
+                            if (journee.length > 1 || nuit.length > 1) {
+                              return (
+                                <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/30 rounded-full text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                                  <AlertCircle className="w-2.5 h-2.5" /> Conflit de shift détecté
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center">{allSessions.length}</span>
+                        </div>
+                      </div>
+                      {allSessions.length === 0 ? (
+                        <div className="bg-slate-100 dark:bg-slate-800 rounded-xl p-6 text-center border border-slate-200 dark:border-slate-700">
+                          <Users className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Aucune session active</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                          {allSessions.map((session) => {
+                            const isMe = session.sessionId === mySessionIdRef.current;
+                            const shiftDuplicate = allSessions.filter(s => s.role === 'editor' && s.shift === session.shift && session.role === 'editor').length > 1;
+                            return (
+                              <div key={session.sessionId} className={`rounded-xl border p-4 flex flex-col gap-3 relative ${isMe ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/40' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
+                                {isMe && <span className="absolute top-2 right-2 text-[8px] font-black text-blue-500 uppercase tracking-widest">Vous</span>}
+                                {shiftDuplicate && !isMe && (
+                                  <span className="absolute top-2 right-2 text-[8px] font-black text-amber-500 uppercase tracking-widest flex items-center gap-0.5">
+                                    <AlertCircle className="w-2.5 h-2.5" /> Conflit
+                                  </span>
+                                )}
+                                <div className="flex items-center gap-2.5">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black text-white ${session.role === 'admin' ? 'bg-blue-600' : 'bg-violet-600'}`}>
+                                    {session.name[0].toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-black text-slate-800 dark:text-white">{session.name}</p>
+                                    <p className={`text-[9px] font-black uppercase tracking-wide ${session.role === 'admin' ? 'text-blue-500' : 'text-violet-500'}`}>{session.role === 'admin' ? 'Administrateur' : 'Éditeur'}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${session.shift === 'Journée' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/30' : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/30'}`}>
+                                    {session.shift === 'Journée' ? <Sunrise className="w-2.5 h-2.5 inline mr-0.5" /> : <MoonIcon className="w-2.5 h-2.5 inline mr-0.5" />}{session.shift}
+                                  </span>
+                                  <span className="text-[9px] font-mono text-slate-400">{formatDisplayDate(session.date)}</span>
+                                  <span className="text-[9px] font-mono text-slate-400 flex items-center gap-0.5"><Clock className="w-2 h-2" />{session.loginTime}</span>
+                                </div>
+                                {!isMe && (
+                                  <button onClick={() => handleKickSession(session.sessionId)}
+                                    className="w-full py-1.5 bg-rose-50 dark:bg-rose-900/20 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1">
+                                    <LogOut className="w-2.5 h-2.5" /> Déconnecter
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* OK vs HS chart + Type summary table */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Donut OK vs HS */}
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col h-[300px]">
+                      <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">État Global de la Flotte</h3>
+                      <div className="flex-grow">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie data={stats.statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={5} dataKey="value" stroke="none">
+                              {stats.statusData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }} formatter={(value: number, name: string) => [value, name]} />
+                            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', paddingTop: '8px' }} formatter={(value: string, entry: any) => `${value} : ${entry.payload?.value ?? ''}`} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Type summary table */}
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col">
+                      <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                        <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Par Type d'Engin</h3>
+                      </div>
+                      <div className="overflow-y-auto flex-grow max-h-[250px]">
+                        <table className="w-full text-left">
+                          <thead className="sticky top-0 bg-white dark:bg-slate-800 z-10">
+                            <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] border-b border-slate-100 dark:border-slate-700">
+                              <th className="px-5 py-3">Type</th>
+                              <th className="px-4 py-3 text-center">Total</th>
+                              <th className="px-4 py-3 text-center">OK</th>
+                              <th className="px-4 py-3 text-center">HS</th>
+                              <th className="px-4 py-3 text-right">Dispo.</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
+                            {stats.typeDetailedData.map((type, i) => (
+                              <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                                <td className="px-5 py-3 text-[11px] font-bold text-slate-700 dark:text-slate-200 max-w-[140px] truncate" title={type.name}>{type.name}</td>
+                                <td className="px-4 py-3 text-center text-[11px] font-mono text-slate-500 dark:text-slate-400">{type.total}</td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 rounded text-[10px] font-black">{type.ok}</span>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black ${type.hs > 0 ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400' : 'text-slate-300 dark:text-slate-600'}`}>{type.hs}</span>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <span className={`text-[11px] font-black ${type.taux >= 80 ? 'text-emerald-600 dark:text-emerald-400' : type.taux >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{type.taux}%</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -859,13 +1244,13 @@ export default function App() {
                       <div className="flex-grow">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
-                            <Pie data={stats.statusData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value" stroke="none" label={({ name, value }) => `${name}: ${value}`}>
+                            <Pie data={stats.statusData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value" stroke="none">
                               {stats.statusData.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.color} />
                               ))}
                             </Pie>
-                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }} />
-                            <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} verticalAlign="bottom" height={36}/>
+                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }} formatter={(value: number, name: string) => [value, name]} />
+                            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', paddingTop: '8px' }} formatter={(value: string, entry: any) => `${value} : ${entry.payload?.value ?? ''}`} />
                           </PieChart>
                         </ResponsiveContainer>
                       </div>
@@ -930,6 +1315,121 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+
+                  {/* Répartition par Type d'Engin */}
+                  <div>
+                    <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-6">Répartition par Type d'Engin</h3>
+                    {stats.typeDetailedData.length === 0 ? (
+                      <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 flex flex-col items-center justify-center text-center border border-slate-200 dark:border-slate-700">
+                        <BarChart3 className="w-10 h-10 text-slate-300 dark:text-slate-600 mb-3" />
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Aucune donnée disponible</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {/* Grouped horizontal bar chart */}
+                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                          <h4 className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-5">Analyse OK vs HS par Type</h4>
+                          <ResponsiveContainer width="100%" height={Math.max(240, stats.typeDetailedData.length * 52)}>
+                            <BarChart layout="vertical" data={stats.typeDetailedData} margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" opacity={0.5} />
+                              <XAxis type="number" fontSize={10} axisLine={false} tickLine={false} allowDecimals={false} />
+                              <YAxis type="category" dataKey="name" width={150} fontSize={9} fontWeight="bold" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8' }} />
+                              <Tooltip contentStyle={{ borderRadius: '8px', fontSize: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} formatter={(value: number, name: string) => [value, name]} />
+                              <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                              <Bar dataKey="ok" name="Opérationnel" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14}>
+                                <LabelList dataKey="ok" position="right" style={{ fontSize: '10px', fontWeight: 'bold', fill: '#059669' }} formatter={(v: number) => v > 0 ? v : ''} />
+                              </Bar>
+                              <Bar dataKey="hs" name="Hors Service" fill="#f43f5e" radius={[0, 4, 4, 0]} barSize={14}>
+                                <LabelList dataKey="hs" position="right" style={{ fontSize: '10px', fontWeight: 'bold', fill: '#e11d48' }} formatter={(v: number) => v > 0 ? v : ''} />
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        {/* Type cards grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                          {stats.typeDetailedData.map((type, i) => (
+                            <div key={i} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex flex-col gap-3 shadow-sm">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="text-[11px] font-black text-slate-700 dark:text-slate-200 uppercase leading-tight">{type.name}</span>
+                                <span className={`shrink-0 px-2 py-0.5 rounded-full text-[9px] font-black border ${
+                                  type.taux >= 80
+                                    ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/30'
+                                    : type.taux >= 50
+                                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/30'
+                                    : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800/30'
+                                }`}>{type.taux}%</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="text-center shrink-0">
+                                  <div className="text-2xl font-black text-slate-800 dark:text-white leading-none">{type.total}</div>
+                                  <div className="text-[8px] font-bold text-slate-400 uppercase mt-0.5">Total</div>
+                                </div>
+                                <div className="flex-grow flex flex-col gap-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                    <div className="flex-grow h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                                      <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${type.total > 0 ? (type.ok / type.total) * 100 : 0}%` }} />
+                                    </div>
+                                    <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 w-4 text-right shrink-0">{type.ok}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                                    <div className="flex-grow h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                                      <div className="h-full bg-rose-500 rounded-full transition-all duration-500" style={{ width: `${type.total > 0 ? (type.hs / type.total) * 100 : 0}%` }} />
+                                    </div>
+                                    <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 w-4 text-right shrink-0">{type.hs}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Summary table */}
+                        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                            <h4 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Résumé Détaillé par Type</h4>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                              <thead>
+                                <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100 dark:border-slate-800">
+                                  <th className="px-6 py-4">Type d'Engin</th>
+                                  <th className="px-6 py-4 text-center">Total</th>
+                                  <th className="px-6 py-4 text-center">OK</th>
+                                  <th className="px-6 py-4 text-center">HS</th>
+                                  <th className="px-6 py-4 text-right">Disponibilité</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {stats.typeDetailedData.map((type, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                                    <td className="px-6 py-4 font-bold text-slate-700 dark:text-slate-200">{type.name}</td>
+                                    <td className="px-6 py-4 text-center font-mono text-slate-600 dark:text-slate-400">{type.total}</td>
+                                    <td className="px-6 py-4 text-center">
+                                      <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 rounded text-xs font-bold">{type.ok}</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${type.hs > 0 ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400' : 'text-slate-300 dark:text-slate-600'}`}>{type.hs}</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <div className="flex items-center justify-end gap-3">
+                                        <div className="w-24 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden hidden sm:block">
+                                          <div className={`h-full rounded-full ${type.taux >= 80 ? 'bg-emerald-500' : type.taux >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${type.taux}%` }} />
+                                        </div>
+                                        <span className={`font-black text-sm ${type.taux >= 80 ? 'text-emerald-600 dark:text-emerald-400' : type.taux >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{type.taux}%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : activeTab === 'outofparc' ? (
@@ -1135,45 +1635,207 @@ export default function App() {
         )}
       </main>
 
-      {/* Password Modal */}
+      {/* Modal : Mot de passe Admin */}
       {showPasswordModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div 
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-sm space-y-6"
-          >
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-sm space-y-6">
             <div className="text-center space-y-2">
               <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto text-blue-600 dark:text-blue-400 mb-4">
-                <Lock className="w-6 h-6" />
+                <ShieldCheck className="w-6 h-6" />
               </div>
               <h3 className="text-xl font-bold text-slate-800 dark:text-white">Accès Administration</h3>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Entrez votre code (IRATIB)</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Code sécurisé requis</p>
             </div>
             <div className="space-y-4">
-              <input 
-                type="password" value={passwordInput}
+              <input type="password" value={passwordInput}
                 onChange={e => setPasswordInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && verifyPassword()}
-                autoFocus placeholder="••••"
+                autoFocus placeholder="••••••"
                 className={`w-full text-center text-2xl tracking-[1em] font-black px-4 py-3 bg-slate-50 dark:bg-slate-800 border ${passwordError ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'} rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all`}
               />
-              {passwordError && (
-                <p className="text-[10px] font-black text-rose-500 text-center uppercase tracking-widest">Code incorrect</p>
-              )}
+              {passwordError && <p className="text-[10px] font-black text-rose-500 text-center uppercase tracking-widest">Code incorrect</p>}
             </div>
             <div className="flex gap-3 pt-2">
-              <button 
-                onClick={() => setShowPasswordModal(false)}
-                className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-xs font-black hover:bg-slate-200 transition-all uppercase tracking-widest"
-              >
-                Annuler
+              <button onClick={() => setShowPasswordModal(false)} className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-xs font-black hover:bg-slate-200 transition-all uppercase tracking-widest">Annuler</button>
+              <button onClick={verifyPassword} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-black shadow-md hover:bg-blue-700 transition-all uppercase tracking-widest">Valider</button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal : Session Admin (shift + date) */}
+      {showSessionModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-sm space-y-6">
+            <div className="text-center space-y-2">
+              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto text-blue-600 dark:text-blue-400 mb-4">
+                <Calendar className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-800 dark:text-white">Informations de Session</h3>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Administrateur</p>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shift</label>
+                <div className="flex gap-3">
+                  {(['Journée', 'Nuit'] as const).map(s => (
+                    <button key={s} onClick={() => setSessionForm(f => ({ ...f, shift: s }))}
+                      className={`flex-1 py-2.5 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-2 ${sessionForm.shift === s ? (s === 'Journée' ? 'bg-amber-500 text-white border-amber-500 shadow-md' : 'bg-indigo-600 text-white border-indigo-600 shadow-md') : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500'}`}>
+                      {s === 'Journée' ? <Sunrise className="w-3.5 h-3.5" /> : <MoonIcon className="w-3.5 h-3.5" />}
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</label>
+                <input type="date" value={sessionForm.date}
+                  onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all outline-none"
+                />
+              </div>
+            </div>
+            <button onClick={handleAdminSessionSubmit}
+              className="w-full py-3 bg-blue-600 text-white rounded-xl text-sm font-black shadow-md hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
+              <ShieldCheck className="w-4 h-4" />
+              Commencer la session
+            </button>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal : Connexion Éditeur */}
+      {showEditorLoginModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-sm space-y-5">
+            <div className="text-center space-y-2">
+              <div className="w-12 h-12 bg-violet-100 dark:bg-violet-900/30 rounded-full flex items-center justify-center mx-auto text-violet-600 dark:text-violet-400 mb-4">
+                <User className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-800 dark:text-white">Connexion Éditeur</h3>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Saisissez vos identifiants</p>
+            </div>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Identifiant</label>
+                <input type="text" value={editorLoginForm.id}
+                  onChange={e => setEditorLoginForm(f => ({ ...f, id: e.target.value }))}
+                  autoFocus placeholder="Votre identifiant"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all outline-none"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mot de passe</label>
+                <input type="password" value={editorLoginForm.password}
+                  onChange={e => setEditorLoginForm(f => ({ ...f, password: e.target.value }))}
+                  placeholder="••••••"
+                  onKeyDown={e => e.key === 'Enter' && handleEditorLogin()}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all outline-none"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shift</label>
+                <div className="flex gap-3">
+                  {(['Journée', 'Nuit'] as const).map(s => (
+                    <button key={s} onClick={() => setEditorLoginForm(f => ({ ...f, shift: s }))}
+                      className={`flex-1 py-2 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1.5 ${editorLoginForm.shift === s ? (s === 'Journée' ? 'bg-amber-500 text-white border-amber-500' : 'bg-indigo-600 text-white border-indigo-600') : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500'}`}>
+                      {s === 'Journée' ? <Sunrise className="w-3 h-3" /> : <MoonIcon className="w-3 h-3" />}
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</label>
+                <input type="date" value={editorLoginForm.date}
+                  onChange={e => setEditorLoginForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all outline-none"
+                />
+              </div>
+              {editorLoginError && <p className="text-[10px] font-black text-rose-500 text-center uppercase tracking-widest">{editorLoginError}</p>}
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setShowEditorLoginModal(false)} className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-xs font-black hover:bg-slate-200 transition-all uppercase tracking-widest">Annuler</button>
+              <button onClick={handleEditorLogin} className="flex-1 px-4 py-2 bg-violet-600 text-white rounded-lg text-xs font-black shadow-md hover:bg-violet-700 transition-all uppercase tracking-widest">Connexion</button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal : Gestion des utilisateurs (Admin seulement) */}
+      {showUserManagementModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-violet-100 dark:bg-violet-900/30 rounded-xl flex items-center justify-center text-violet-600 dark:text-violet-400">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 dark:text-white">Gestion des Éditeurs</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Accès réservé à l'Admin</p>
+                </div>
+              </div>
+              <button onClick={() => setShowUserManagementModal(false)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-all text-slate-400">
+                <LogOut className="w-4 h-4 rotate-180" />
               </button>
-              <button 
-                onClick={verifyPassword}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-black shadow-md hover:bg-blue-700 transition-all uppercase tracking-widest"
-              >
-                Valider
+            </div>
+
+            {/* Existing editors */}
+            <div className="p-6 space-y-4 max-h-64 overflow-y-auto">
+              {editorUsers.length === 0 ? (
+                <div className="text-center py-6">
+                  <Users className="w-10 h-10 text-slate-200 dark:text-slate-700 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Aucun éditeur créé</p>
+                </div>
+              ) : (
+                editorUsers.map((u, i) => (
+                  <div key={i} className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center text-white text-xs font-black">{u.id[0].toUpperCase()}</div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800 dark:text-white">{u.id}</p>
+                        <p className="text-[10px] font-bold text-violet-500 uppercase tracking-widest">Éditeur</p>
+                      </div>
+                    </div>
+                    <button onClick={() => handleRemoveEditor(u.id)}
+                      className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/20 hover:text-rose-600 text-slate-400 rounded-lg transition-all">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Add new editor */}
+            <div className="border-t border-slate-100 dark:border-slate-800 p-6 space-y-4 bg-slate-50/50 dark:bg-slate-900/30">
+              <h4 className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <UserPlus className="w-3.5 h-3.5" /> Créer un éditeur
+              </h4>
+              <div className="grid grid-cols-3 gap-3">
+                <input type="text" placeholder="Identifiant" value={newEditorForm.id}
+                  onChange={e => setNewEditorForm(f => ({ ...f, id: e.target.value }))}
+                  className="col-span-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all outline-none"
+                />
+                <input type="password" placeholder="Mot de passe" value={newEditorForm.password}
+                  onChange={e => setNewEditorForm(f => ({ ...f, password: e.target.value }))}
+                  className="col-span-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all outline-none"
+                />
+                <input type="password" placeholder="Confirmer" value={newEditorForm.confirmPassword}
+                  onChange={e => setNewEditorForm(f => ({ ...f, confirmPassword: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleAddEditor()}
+                  className="col-span-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all outline-none"
+                />
+              </div>
+              {newEditorError && <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest">{newEditorError}</p>}
+              <button onClick={handleAddEditor}
+                className="w-full py-2.5 bg-violet-600 text-white rounded-xl text-xs font-black shadow-md hover:bg-violet-700 transition-all flex items-center justify-center gap-2">
+                <UserPlus className="w-3.5 h-3.5" />
+                Créer l'éditeur
               </button>
             </div>
           </motion.div>
