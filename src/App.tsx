@@ -526,7 +526,7 @@ export default function App() {
       const rows = parseGviz(text);
 
       const mappedHistory: HistoryItem[] = rows.map((row) => ({
-        timestamp:   row[0] || '',        // dd/MM/yyyy HH:mm — envoyé par le frontend
+        timestamp:   formatDate(row[0] || ''),  // dd/MM/yyyy HH:mm
         designation: row[1] || 'Sans nom',
         numEngin:    row[2] || 'N/A',
         zone:        row[3] || '',
