@@ -234,6 +234,9 @@ export default function App() {
   const [newEditorError, setNewEditorError] = useState('');
   const [selectedTypeDetail, setSelectedTypeDetail] = useState<string | null>(null);
   const [dashZoneFilter, setDashZoneFilter] = useState('Toutes');
+  const [retireTarget, setRetireTarget] = useState<SheetData | null>(null);
+  const [retireObs, setRetireObs] = useState('');
+  const [permDeleteTarget, setPermDeleteTarget] = useState<SheetData | null>(null);
 
   const captureTypeTable = (rows: { name: string; total: number; ok: number; hs: number; taux: number }[]) => {
     if (rows.length === 0) return;
@@ -541,10 +544,30 @@ export default function App() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.designation || !form.numEngin) return;
+    const isEdit = editingRow !== null && editingRow !== -1;
+
+    // Unicité du numéro d'engin
+    const duplicate = data.find(d =>
+      d.numEngin.trim().toLowerCase() === form.numEngin.trim().toLowerCase() &&
+      d.rowIndex !== editingRow
+    );
+    if (duplicate) {
+      alert(`Le numéro d'engin "${form.numEngin}" est déjà utilisé par "${duplicate.designation}". Chaque numéro doit être unique.`);
+      return;
+    }
+
+    // Observation obligatoire si passage OK → HS en mode édition
+    if (isEdit) {
+      const original = data.find(d => d.rowIndex === editingRow);
+      if (original?.etat === 'OK' && form.etat === 'HS' && !form.observation.trim()) {
+        alert('L\'observation est obligatoire pour justifier le passage en Hors Service.');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       const values = [form.designation, form.numEngin, form.zone, form.etat, form.observation];
-      const isEdit = editingRow !== null && editingRow !== -1;
 
       // Mise à jour ou ajout dans Feuil1
       await fetch(APPS_SCRIPT_URL, {
@@ -602,12 +625,33 @@ export default function App() {
     setEditingRow(null);
   };
 
-  const handleDelete = async (item: SheetData) => {
-    if (!confirm(`Retirer "${item.designation} (${item.numEngin})" de la flotte active ?`)) return;
-    statutOverrides.current.set(item.rowIndex!, 'Retiré');
-    setData(prev => prev.map(d => d.rowIndex === item.rowIndex ? { ...d, statut: 'Retiré' } : d));
-    fetch(`${APPS_SCRIPT_URL}?action=retire&sheet=Feuille%201&rowIndex=${item.rowIndex}`, { method: 'GET', mode: 'no-cors' })
+  const handleDelete = (item: SheetData) => {
+    setRetireObs('');
+    setRetireTarget(item);
+  };
+
+  const confirmRetire = () => {
+    if (!retireTarget) return;
+    if (!retireObs.trim()) { alert('L\'observation est obligatoire pour justifier le retrait de l\'engin.'); return; }
+    statutOverrides.current.set(retireTarget.rowIndex!, 'Retiré');
+    setData(prev => prev.map(d => d.rowIndex === retireTarget.rowIndex ? { ...d, statut: 'Retiré', observation: retireObs.trim() } : d));
+    fetch(`${APPS_SCRIPT_URL}?action=retire&sheet=Feuille%201&rowIndex=${retireTarget.rowIndex}&observation=${encodeURIComponent(retireObs.trim())}`, { method: 'GET', mode: 'no-cors' })
       .catch(() => {});
+    setRetireTarget(null);
+    setRetireObs('');
+  };
+
+  const handlePermanentDelete = (item: SheetData) => {
+    setPermDeleteTarget(item);
+  };
+
+  const confirmPermanentDelete = () => {
+    if (!permDeleteTarget) return;
+    setData(prev => prev.filter(d => d.rowIndex !== permDeleteTarget.rowIndex));
+    statutOverrides.current.delete(permDeleteTarget.rowIndex!);
+    fetch(`${APPS_SCRIPT_URL}?action=delete&sheet=Feuille%201&rowIndex=${permDeleteTarget.rowIndex}`, { method: 'GET', mode: 'no-cors' })
+      .catch(() => {});
+    setPermDeleteTarget(null);
   };
 
   const handleRestore = async (item: SheetData) => {
@@ -1735,13 +1779,23 @@ export default function App() {
                               <td className="px-6 py-4 italic text-slate-600 text-xs truncate max-w-[180px]">{item.observation || '-'}</td>
                               {userRole === 'admin' && (
                                 <td className="px-6 py-4 text-center">
-                                  <button
-                                    onClick={() => handleRestore(item)}
-                                    className="text-emerald-400 hover:text-white hover:bg-emerald-600 border border-transparent hover:border-emerald-500 font-black text-[10px] px-3 py-1.5 rounded uppercase tracking-tighter transition-all flex items-center gap-1.5 mx-auto"
-                                  >
-                                    <RefreshCw className="w-3 h-3" />
-                                    Restaurer
-                                  </button>
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button
+                                      onClick={() => handleRestore(item)}
+                                      className="text-emerald-400 hover:text-white hover:bg-emerald-600 border border-transparent hover:border-emerald-500 font-black text-[10px] px-3 py-1.5 rounded uppercase tracking-tighter transition-all flex items-center gap-1.5"
+                                    >
+                                      <RefreshCw className="w-3 h-3" />
+                                      Restaurer
+                                    </button>
+                                    <button
+                                      onClick={() => handlePermanentDelete(item)}
+                                      className="text-rose-500 hover:text-white hover:bg-rose-700 border border-transparent hover:border-rose-600 font-black text-[10px] px-3 py-1.5 rounded uppercase tracking-tighter transition-all flex items-center gap-1.5"
+                                      title="Supprimer définitivement de la base de données"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                      Suppr. déf.
+                                    </button>
+                                  </div>
                                 </td>
                               )}
                             </tr>
@@ -1966,6 +2020,81 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* Modal : Confirmation retrait (Out of Parc) */}
+      {retireTarget && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl p-7 border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-md space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 shrink-0 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                <Trash2 className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <h3 className="font-black text-slate-800 dark:text-white text-base">Retirer du parc actif</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                  <span className="font-bold text-slate-700 dark:text-slate-300">{retireTarget.designation} ({retireTarget.numEngin})</span> sera déplacé vers Out of Parc.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                Motif du retrait <span className="text-rose-500">*</span>
+              </label>
+              <textarea
+                rows={3} value={retireObs} onChange={e => setRetireObs(e.target.value)}
+                autoFocus
+                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500 outline-none resize-none dark:text-white text-sm placeholder:text-slate-400 shadow-inner"
+                placeholder="Ex: Panne moteur, maintenance programmée, révision générale..."
+              />
+              {!retireObs.trim() && <p className="text-[10px] text-rose-500 font-bold">Le motif est obligatoire.</p>}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setRetireTarget(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all">
+                Annuler
+              </button>
+              <button onClick={confirmRetire} disabled={!retireObs.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-sm shadow-lg shadow-amber-600/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                Confirmer le retrait
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal : Suppression définitive */}
+      {permDeleteTarget && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl p-7 border border-rose-200 dark:border-rose-900/50 shadow-2xl w-full max-w-md space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 shrink-0 rounded-full bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
+                <Trash2 className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+              </div>
+              <div>
+                <h3 className="font-black text-rose-700 dark:text-rose-400 text-base uppercase tracking-wide">Suppression définitive</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  L'engin <span className="font-bold text-slate-700 dark:text-slate-300">{permDeleteTarget.designation} ({permDeleteTarget.numEngin})</span> sera <span className="font-black text-rose-600">supprimé définitivement</span> de la base de données. Cette action est <span className="font-black">irréversible</span>.
+                </p>
+              </div>
+            </div>
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/20 rounded-xl border border-rose-100 dark:border-rose-900/30 text-[11px] text-rose-700 dark:text-rose-400 font-bold">
+              ⚠ La ligne sera supprimée du Google Sheet. L'historique associé reste conservé.
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setPermDeleteTarget(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all">
+                Annuler
+              </button>
+              <button onClick={confirmPermanentDelete}
+                className="flex-1 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white font-black text-sm shadow-lg shadow-rose-700/20 transition-all">
+                Supprimer définitivement
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Modal : Mot de passe Admin */}
       {showPasswordModal && (
