@@ -95,6 +95,35 @@ const formatDate = (value: string): string => {
   return value.replace(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}):\d{2}/, '$1');
 };
 
+// Jauge semi-circulaire SVG — utilisée dans le Dashboard
+function GaugeChart({ pct, isDark }: { pct: number; isDark: boolean }) {
+  const cx = 60, cy = 56, r = 44, sw = 11;
+  const arcLen = Math.PI * r;
+  const filled = arcLen * Math.min(Math.max(pct, 0), 1);
+  const color = pct >= 0.8 ? '#10b981' : pct >= 0.5 ? '#f59e0b' : '#f43f5e';
+  const track = isDark ? '#0f172a' : '#f1f5f9';
+  return (
+    <svg viewBox="0 0 120 74" className="w-full" aria-label={`${Math.round(pct * 100)}% opérationnel`}>
+      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+        fill="none" stroke={track} strokeWidth={sw} strokeLinecap="round" />
+      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+        fill="none" stroke={color} strokeWidth={sw + 5} strokeLinecap="round" opacity={0.12}
+        strokeDasharray={arcLen} strokeDashoffset={arcLen - filled}
+        style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1)' }} />
+      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+        fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round"
+        strokeDasharray={arcLen} strokeDashoffset={arcLen - filled}
+        style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1)' }} />
+      <text x={cx} y={cy - 7} textAnchor="middle" fontSize="17" fontWeight="900" fill={color}
+        style={{ fontFamily: 'inherit' }}>{Math.round(pct * 100)}%</text>
+      <text x={cx} y={cy + 8} textAnchor="middle" fontSize="6" fontWeight="700" letterSpacing="1.2"
+        fill={isDark ? '#475569' : '#94a3b8'} style={{ fontFamily: 'inherit' }}>OPÉRATIONNEL</text>
+      <text x={cx - r + 3} y={cy + 17} textAnchor="start" fontSize="6" fill={isDark ? '#334155' : '#cbd5e1'}>0%</text>
+      <text x={cx + r - 3} y={cy + 17} textAnchor="end"   fontSize="6" fill={isDark ? '#334155' : '#cbd5e1'}>100%</text>
+    </svg>
+  );
+}
+
 interface ActiveSession {
   sessionId: string;
   name: string;
@@ -194,6 +223,61 @@ export default function App() {
   const [showUserManagementModal, setShowUserManagementModal] = useState(false);
   const [newEditorForm, setNewEditorForm] = useState({ id: '', password: '', confirmPassword: '' });
   const [newEditorError, setNewEditorError] = useState('');
+  const [selectedTypeDetail, setSelectedTypeDetail] = useState<string | null>(null);
+  const [dashZoneFilter, setDashZoneFilter] = useState('Toutes');
+
+  const captureTypeTable = (rows: { name: string; total: number; ok: number; hs: number; taux: number }[]) => {
+    if (rows.length === 0) return;
+    const sc = 2, pad = 24, rH = 40, thH = 40, titH = 68;
+    const cW = [200, 60, 60, 60, 76];
+    const W = cW.reduce((a, b) => a + b) + pad * 2;
+    const H = titH + thH + rows.length * rH + pad;
+    const cvs = document.createElement('canvas');
+    cvs.width = W * sc; cvs.height = H * sc;
+    const ctx = cvs.getContext('2d')!;
+    ctx.scale(sc, sc);
+    const dark = isDarkMode;
+    ctx.fillStyle = dark ? '#0f172a' : '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#3b82f6'; ctx.fillRect(0, 0, 3, H);
+    ctx.fillStyle = dark ? '#f1f5f9' : '#0f172a';
+    ctx.font = 'bold 13px system-ui, sans-serif';
+    ctx.fillText("Répartition par Type d'Engin", pad, 26);
+    ctx.fillStyle = dark ? '#475569' : '#94a3b8';
+    ctx.font = '8px system-ui, sans-serif';
+    const now = new Date();
+    ctx.fillText(`Export ${now.toLocaleDateString('fr-FR')} ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · Zone: ${dashZoneFilter} · Suivi de Flotte Engins`, pad, 44);
+    ctx.fillStyle = dark ? '#1e293b' : '#f1f5f9'; ctx.fillRect(0, 56, W, 1);
+    let y = titH;
+    ctx.fillStyle = dark ? '#1e293b' : '#f8fafc'; ctx.fillRect(0, y, W, thH);
+    let x = pad;
+    ["Type d'Engin", 'Total', 'OK', 'HS', 'Dispo.'].forEach((h, i) => {
+      ctx.fillStyle = dark ? '#64748b' : '#94a3b8'; ctx.font = 'bold 8px system-ui, sans-serif';
+      ctx.fillText(h.toUpperCase(), x + 4, y + thH / 2 + 3); x += cW[i];
+    });
+    y += thH;
+    rows.forEach((row, idx) => {
+      ctx.fillStyle = idx % 2 === 0 ? (dark ? '#0f172a' : '#ffffff') : (dark ? '#1e293b' : '#f8fafc');
+      ctx.fillRect(0, y, W, rH);
+      x = pad;
+      const vals = [row.name, `${row.total}`, `${row.ok}`, `${row.hs}`, `${row.taux}%`];
+      const clrs = [dark ? '#e2e8f0' : '#1e293b', dark ? '#94a3b8' : '#64748b', '#10b981', row.hs > 0 ? '#f43f5e' : (dark ? '#334155' : '#e2e8f0'), row.taux >= 80 ? '#10b981' : row.taux >= 50 ? '#f59e0b' : '#f43f5e'];
+      vals.forEach((v, i) => {
+        ctx.fillStyle = clrs[i]; ctx.font = `${i === 0 ? 'bold ' : ''}10px system-ui, sans-serif`;
+        const tw = ctx.measureText(v).width;
+        ctx.fillText(v, i === 0 ? x + 4 : x + cW[i] / 2 - tw / 2, y + rH / 2 + 4); x += cW[i];
+      });
+      ctx.fillStyle = dark ? '#1e293b' : '#f1f5f9'; ctx.fillRect(0, y + rH - 1, W, 1);
+      y += rH;
+    });
+    cvs.toBlob(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `flotte-types-${now.toISOString().split('T')[0]}.png`; a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  };
 
   const formatDisplayDate = (d: string) => { if (!d) return ''; const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; };
 
@@ -588,6 +672,28 @@ export default function App() {
 
     return { total, ok, hs, maintenance, okPercentage, zoneData, statusData, zoneDetailedData, typeDetailedData };
   }, [data]);
+
+  const dashStats = useMemo(() => {
+    const active = data.filter(d => d.statut !== 'Retiré');
+    const filtered = dashZoneFilter === 'Toutes' ? active : active.filter(d => d.zone === dashZoneFilter);
+    const total = filtered.length;
+    const ok = filtered.filter(d => d.etat === 'OK').length;
+    const hs = filtered.filter(d => d.etat === 'HS').length;
+    const statusData = [
+      { name: 'Opérationnel', value: ok, pct: total > 0 ? Math.round(ok / total * 100) : 0, color: '#10b981' },
+      { name: 'Hors Service',  value: hs, pct: total > 0 ? Math.round(hs / total * 100) : 0, color: '#f43f5e' }
+    ].filter(d => d.value > 0);
+    const typeMap = filtered.reduce((acc, d) => {
+      const k = d.designation.toUpperCase();
+      if (!acc[k]) acc[k] = { total: 0, ok: 0, hs: 0 };
+      acc[k].total++; if (d.etat === 'OK') acc[k].ok++; if (d.etat === 'HS') acc[k].hs++;
+      return acc;
+    }, {} as Record<string, { total: number; ok: number; hs: number }>);
+    const typeData = (Object.entries(typeMap) as [string, { total: number; ok: number; hs: number }][])
+      .map(([name, c]) => ({ name, total: c.total, ok: c.ok, hs: c.hs, taux: c.total > 0 ? Math.round(c.ok / c.total * 100) : 0 }))
+      .sort((a, b) => b.total - a.total);
+    return { total, ok, hs, statusData, typeData };
+  }, [data, dashZoneFilter]);
 
   return (
     <div className="bg-slate-50 dark:bg-slate-950 min-h-screen flex flex-col font-sans text-slate-900 dark:text-slate-100 selection:bg-blue-100 dark:selection:bg-blue-900/30 selection:text-blue-900 dark:selection:text-blue-100 transition-colors duration-300">
@@ -1087,6 +1193,58 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* ── Performance par Type d'Engin — Gauge Charts ── */}
+                  {stats.typeDetailedData.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 pl-1">Performance par Type d'Engin</h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                        {stats.typeDetailedData.map((type, i) => {
+                          const pct = type.total > 0 ? type.ok / type.total : 0;
+                          const borderCls = pct >= 0.8
+                            ? 'border-emerald-100 dark:border-emerald-900/30 hover:border-emerald-300 dark:hover:border-emerald-700/50'
+                            : pct >= 0.5
+                            ? 'border-amber-100 dark:border-amber-900/30 hover:border-amber-300 dark:hover:border-amber-700/50'
+                            : 'border-rose-100 dark:border-rose-900/30 hover:border-rose-300 dark:hover:border-rose-700/50';
+                          const textCls = pct >= 0.8 ? 'text-emerald-600 dark:text-emerald-400' : pct >= 0.5 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400';
+                          return (
+                            <div key={i}
+                              onClick={() => setSelectedTypeDetail(type.name)}
+                              title={`${type.name} — Cliquer pour le détail`}
+                              className={`bg-white dark:bg-slate-800 rounded-2xl border ${borderCls} p-3 cursor-pointer transition-all duration-200 hover:scale-[1.03] hover:shadow-lg dark:hover:shadow-slate-900/50 group select-none`}>
+                              <p className="text-[9px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wide text-center mb-0.5 leading-tight line-clamp-2 min-h-[24px] flex items-center justify-center">
+                                {type.name}
+                              </p>
+                              <GaugeChart pct={pct} isDark={isDarkMode} />
+                              <div className="flex items-center justify-center gap-2 mt-1">
+                                <div className="text-center">
+                                  <div className={`text-sm font-black ${textCls}`}>{type.ok}</div>
+                                  <div className="text-[8px] font-bold text-slate-400 uppercase leading-none">OK</div>
+                                </div>
+                                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+                                <div className="text-center">
+                                  <div className="text-sm font-black text-slate-700 dark:text-slate-300">{type.total}</div>
+                                  <div className="text-[8px] font-bold text-slate-400 uppercase leading-none">Total</div>
+                                </div>
+                                {type.hs > 0 && (
+                                  <>
+                                    <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+                                    <div className="text-center">
+                                      <div className="text-sm font-black text-rose-500">{type.hs}</div>
+                                      <div className="text-[8px] font-bold text-slate-400 uppercase leading-none">HS</div>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                              <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity text-center">
+                                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Voir détail →</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Sessions Actives — visible Admin uniquement */}
                   {mySession?.role === 'admin' && (
                     <div>
@@ -1160,63 +1318,126 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* OK vs HS chart + Type summary table */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Donut OK vs HS */}
-                    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col h-[300px]">
+                  {/* Zone filter bar */}
+                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} className="flex flex-wrap gap-2 items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-1">Zone :</span>
+                    {(['Toutes', ...stats.zoneData.map(z => z.name)] as string[]).map(zone => (
+                      <button key={zone} onClick={() => setDashZoneFilter(zone)}
+                        className={`px-3 py-1 rounded-full text-[10px] font-black border transition-all ${dashZoneFilter === zone ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-200 dark:shadow-blue-900/30' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:text-blue-600'}`}>
+                        {zone}
+                      </button>
+                    ))}
+                  </motion.div>
+
+                  {/* Donut + Bar chart row */}
+                  <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05 }} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Improved donut */}
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
                       <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">État Global de la Flotte</h3>
-                      <div className="flex-grow">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie data={stats.statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={5} dataKey="value" stroke="none">
-                              {stats.statusData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                              ))}
-                            </Pie>
-                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }} formatter={(value: number, name: string) => [value, name]} />
-                            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', paddingTop: '8px' }} formatter={(value: string, entry: any) => `${value} : ${entry.payload?.value ?? ''}`} />
-                          </PieChart>
-                        </ResponsiveContainer>
+                      <div className="flex items-center gap-6 flex-grow">
+                        <div className="relative shrink-0" style={{ width: 160, height: 160 }}>
+                          <ResponsiveContainer width={160} height={160}>
+                            <PieChart>
+                              <Pie data={dashStats.statusData} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={4} dataKey="value" stroke="none" startAngle={90} endAngle={-270}>
+                                {dashStats.statusData.map((entry, index) => (
+                                  <Cell key={`dc-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                            <span className="text-2xl font-black text-slate-800 dark:text-white leading-none">{dashStats.total}</span>
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">Engins</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-4 flex-grow">
+                          {dashStats.statusData.map((d, i) => (
+                            <div key={i} className="flex flex-col gap-1.5">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                                  <span className="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-wide">{d.name}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-black" style={{ color: d.color }}>{d.value}</span>
+                                  <span className="text-[10px] font-bold text-slate-400">({d.pct}%)</span>
+                                </div>
+                              </div>
+                              <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                                <motion.div className="h-full rounded-full" style={{ background: d.color }} initial={{ width: 0 }} animate={{ width: `${d.pct}%` }} transition={{ duration: 0.8, ease: 'easeOut' }} />
+                              </div>
+                            </div>
+                          ))}
+                          {dashStats.statusData.length === 0 && (
+                            <p className="text-xs text-slate-400 italic">Aucune donnée</p>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Type summary table */}
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col">
-                      <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-                        <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Par Type d'Engin</h3>
-                      </div>
-                      <div className="overflow-y-auto flex-grow max-h-[250px]">
-                        <table className="w-full text-left">
-                          <thead className="sticky top-0 bg-white dark:bg-slate-800 z-10">
-                            <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] border-b border-slate-100 dark:border-slate-700">
-                              <th className="px-5 py-3">Type</th>
-                              <th className="px-4 py-3 text-center">Total</th>
-                              <th className="px-4 py-3 text-center">OK</th>
-                              <th className="px-4 py-3 text-center">HS</th>
-                              <th className="px-4 py-3 text-right">Dispo.</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
-                            {stats.typeDetailedData.map((type, i) => (
-                              <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                                <td className="px-5 py-3 text-[11px] font-bold text-slate-700 dark:text-slate-200 max-w-[140px] truncate" title={type.name}>{type.name}</td>
-                                <td className="px-4 py-3 text-center text-[11px] font-mono text-slate-500 dark:text-slate-400">{type.total}</td>
-                                <td className="px-4 py-3 text-center">
-                                  <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 rounded text-[10px] font-black">{type.ok}</span>
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black ${type.hs > 0 ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400' : 'text-slate-300 dark:text-slate-600'}`}>{type.hs}</span>
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                  <span className={`text-[11px] font-black ${type.taux >= 80 ? 'text-emerald-600 dark:text-emerald-400' : type.taux >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{type.taux}%</span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                    {/* Horizontal bar chart OK vs HS per type */}
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
+                      <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-4">OK vs HS par Type d'Engin</h3>
+                      <div className="flex-grow" style={{ minHeight: Math.max(180, dashStats.typeData.length * 46) }}>
+                        <ResponsiveContainer width="100%" height={Math.max(180, dashStats.typeData.length * 46)}>
+                          <BarChart layout="vertical" data={dashStats.typeData} margin={{ top: 0, right: 36, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" opacity={0.4} />
+                            <XAxis type="number" fontSize={9} axisLine={false} tickLine={false} allowDecimals={false} />
+                            <YAxis type="category" dataKey="name" width={130} fontSize={9} fontWeight="bold" axisLine={false} tickLine={false} tick={{ fill: isDarkMode ? '#94a3b8' : '#64748b' }} />
+                            <Tooltip contentStyle={{ borderRadius: '10px', fontSize: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} formatter={(value: number, name: string) => [value, name]} />
+                            <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                            <Bar dataKey="ok" name="Opérationnel" fill="#10b981" radius={[0, 4, 4, 0]} barSize={12} isAnimationActive>
+                              <LabelList dataKey="ok" position="right" style={{ fontSize: '9px', fontWeight: 'bold', fill: '#059669' }} formatter={(v: number) => v > 0 ? v : ''} />
+                            </Bar>
+                            <Bar dataKey="hs" name="Hors Service" fill="#f43f5e" radius={[0, 4, 4, 0]} barSize={12} isAnimationActive>
+                              <LabelList dataKey="hs" position="right" style={{ fontSize: '9px', fontWeight: 'bold', fill: '#e11d48' }} formatter={(v: number) => v > 0 ? v : ''} />
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
                       </div>
                     </div>
-                  </div>
+                  </motion.div>
+
+                  {/* Type table at bottom with capture button */}
+                  <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                    <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
+                      <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Par Type d'Engin</h3>
+                      <button onClick={() => captureTypeTable(dashStats.typeData)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-white dark:bg-slate-800 shadow-sm">
+                        📸 Capturer le tableau
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead className="sticky top-0 bg-white dark:bg-slate-800 z-10">
+                          <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] border-b border-slate-100 dark:border-slate-700">
+                            <th className="px-5 py-3">Type</th>
+                            <th className="px-4 py-3 text-center">Total</th>
+                            <th className="px-4 py-3 text-center">OK</th>
+                            <th className="px-4 py-3 text-center">HS</th>
+                            <th className="px-4 py-3 text-right">Dispo.</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
+                          {dashStats.typeData.map((type, i) => (
+                            <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                              <td className="px-5 py-3 text-[11px] font-bold text-slate-700 dark:text-slate-200 max-w-[180px] truncate" title={type.name}>{type.name}</td>
+                              <td className="px-4 py-3 text-center text-[11px] font-mono text-slate-500 dark:text-slate-400">{type.total}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 rounded text-[10px] font-black">{type.ok}</span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-black ${type.hs > 0 ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400' : 'text-slate-300 dark:text-slate-600'}`}>{type.hs}</span>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className={`text-[11px] font-black ${type.taux >= 80 ? 'text-emerald-600 dark:text-emerald-400' : type.taux >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{type.taux}%</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </motion.div>
                 </div>
               ) : activeTab === 'stats' ? (
                 <div className="p-8 overflow-y-auto h-full space-y-8 bg-slate-50 dark:bg-slate-900/30">
@@ -1634,6 +1855,82 @@ export default function App() {
           </aside>
         )}
       </main>
+
+      {/* Modal : Détail Type d'Engin */}
+      {selectedTypeDetail && (() => {
+        const type = stats.typeDetailedData.find(t => t.name === selectedTypeDetail);
+        const pct = type && type.total > 0 ? type.ok / type.total : 0;
+        const engines = activeData.filter(item => item.designation.toUpperCase() === selectedTypeDetail);
+        const textCls = pct >= 0.8 ? 'text-emerald-600 dark:text-emerald-400' : pct >= 0.5 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400';
+        const bgCls = pct >= 0.8 ? 'bg-emerald-50 dark:bg-emerald-900/20' : pct >= 0.5 ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-rose-50 dark:bg-rose-900/20';
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setSelectedTypeDetail(null)}>
+            <motion.div initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden"
+              onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className={`p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between ${bgCls}`}>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wide">{selectedTypeDetail}</h3>
+                  <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mt-0.5">
+                    {type?.total} engins · {type?.ok} opérationnels · {type?.hs} HS
+                  </p>
+                </div>
+                <button onClick={() => setSelectedTypeDetail(null)}
+                  className="p-2 hover:bg-white/50 dark:hover:bg-slate-800 rounded-xl text-slate-400 transition-all text-lg leading-none">✕</button>
+              </div>
+              {/* Gauge + KPI */}
+              <div className="flex gap-4 px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="w-28 shrink-0">
+                  <GaugeChart pct={pct} isDark={isDarkMode} />
+                </div>
+                <div className="flex-grow grid grid-cols-3 gap-2 content-center">
+                  <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                    <div className="text-2xl font-black text-slate-800 dark:text-white">{type?.total}</div>
+                    <div className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Total</div>
+                  </div>
+                  <div className="text-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
+                    <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{type?.ok}</div>
+                    <div className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase mt-0.5">OK</div>
+                  </div>
+                  <div className="text-center p-3 bg-rose-50 dark:bg-rose-900/20 rounded-xl">
+                    <div className="text-2xl font-black text-rose-600 dark:text-rose-400">{type?.hs}</div>
+                    <div className="text-[9px] font-bold text-rose-600 dark:text-rose-400 uppercase mt-0.5">HS</div>
+                  </div>
+                </div>
+              </div>
+              {/* Engine list */}
+              <div className="overflow-y-auto max-h-72 p-4 space-y-2">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-1 mb-3">Détail des engins</p>
+                {engines.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-4">Aucun engin actif</p>
+                ) : engines.map((eng, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${eng.etat === 'OK' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                      <div>
+                        <p className="text-xs font-black text-slate-700 dark:text-slate-200 font-mono">{eng.numEngin}</p>
+                        <p className="text-[9px] text-slate-400 font-bold uppercase">{eng.zone}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {eng.observation && (
+                        <p className="text-[9px] italic text-slate-400 max-w-[110px] truncate hidden sm:block">{eng.observation}</p>
+                      )}
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${
+                        eng.etat === 'OK'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/30'
+                          : 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-900/30'
+                      }`}>{eng.etat}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        );
+      })()}
 
       {/* Modal : Mot de passe Admin */}
       {showPasswordModal && (
