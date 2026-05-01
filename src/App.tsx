@@ -349,6 +349,7 @@ export default function App() {
     };
     if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
     sessionStorage.setItem('mySessionId', sessionId);
+    sessionStorage.setItem('mySession', JSON.stringify(session));
     mySessionIdRef.current = sessionId;
     addSession(session);
     setMySession(session);
@@ -370,6 +371,7 @@ export default function App() {
       };
       if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
       sessionStorage.setItem('mySessionId', sessionId);
+      sessionStorage.setItem('mySession', JSON.stringify(session));
       mySessionIdRef.current = sessionId;
       addSession(session);
       setMySession(session);
@@ -384,6 +386,7 @@ export default function App() {
   const handleLogout = () => {
     if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
     sessionStorage.removeItem('mySessionId');
+    sessionStorage.removeItem('mySession');
     mySessionIdRef.current = null;
     setMySession(null);
     setUserRole('viewer');
@@ -427,12 +430,20 @@ export default function App() {
 
   // Restaurer la session + ouvrir le canal inter-onglets
   useEffect(() => {
-    // Restaurer ma session si l'onglet est rechargé
-    const sid = sessionStorage.getItem('mySessionId');
-    if (sid) {
-      const session = getSessions().find(s => s.sessionId === sid);
-      if (session) { setMySession(session); setUserRole('admin'); mySessionIdRef.current = sid; }
-      else { sessionStorage.removeItem('mySessionId'); }
+    // sessionStorage survit aux refreshs et se vide à la fermeture de l'onglet
+    const raw = sessionStorage.getItem('mySession');
+    if (raw) {
+      try {
+        const session: ActiveSession = JSON.parse(raw);
+        // Re-enregistrer dans activeSessions si elle a disparu (ex: autre onglet a nettoyé)
+        const sessions = getSessions();
+        if (!sessions.find(s => s.sessionId === session.sessionId)) {
+          persistSessions([...sessions, session]);
+        }
+        mySessionIdRef.current = session.sessionId;
+        setMySession(session);
+        setUserRole('admin');
+      } catch { sessionStorage.removeItem('mySession'); sessionStorage.removeItem('mySessionId'); }
     }
     // BroadcastChannel : canal dédié inter-onglets, plus fiable que storage events
     if ('BroadcastChannel' in window) {
@@ -454,18 +465,8 @@ export default function App() {
     };
   }, []);
 
-  // Nettoyer la session uniquement à la fermeture (pas au rafraîchissement)
-  useEffect(() => {
-    const cleanup = () => {
-      // pagehide avec persisted=false = fermeture réelle (pas un refresh/navigation)
-      if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
-    };
-    const onPageHide = (e: PageTransitionEvent) => {
-      if (!e.persisted) cleanup();
-    };
-    window.addEventListener('pagehide', onPageHide);
-    return () => window.removeEventListener('pagehide', onPageHide);
-  }, []);
+  // Pas de cleanup sur les événements navigateur : sessionStorage se vide automatiquement
+  // à la fermeture de l'onglet sans aucun listener nécessaire.
 
   const [form, setForm] = useState({
     designation: '',
