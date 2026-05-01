@@ -95,6 +95,15 @@ const formatDate = (value: string): string => {
   return value.replace(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}):\d{2}/, '$1');
 };
 
+// Zones par type d'engin
+const TRACTEUR_DESIGNATIONS = ['TRACTEUR DE PISTE ELEC', 'TRACTEUR GASOIL'];
+const BASE_ZONES = ['PISTE', 'GSE', 'ANTENNE PISTE'];
+const TRACTEUR_EXTRA_ZONES = ['T1', 'T2', 'T3', 'LIVRAISON', 'CORRESPONDANCE', 'FRET', 'RAVITAILLEMENT'];
+const getZonesForDesignation = (designation: string): string[] =>
+  TRACTEUR_DESIGNATIONS.includes(designation.trim().toUpperCase())
+    ? [...BASE_ZONES, ...TRACTEUR_EXTRA_ZONES]
+    : BASE_ZONES;
+
 // Jauge semi-circulaire SVG — utilisée dans le Dashboard
 function GaugeChart({ pct, isDark }: { pct: number; isDark: boolean }) {
   const cx = 60, cy = 56, r = 44, sw = 11;
@@ -1756,7 +1765,12 @@ export default function App() {
                   <input 
                     type="text" list="designations"
                     value={form.designation}
-                    onChange={e => setForm({...form, designation: e.target.value.toUpperCase()})}
+                    onChange={e => {
+                      const desig = e.target.value.toUpperCase();
+                      const validZones = getZonesForDesignation(desig);
+                      const zone = validZones.includes(form.zone) ? form.zone : validZones[0];
+                      setForm({...form, designation: desig, zone});
+                    }}
                     required
                     className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500 dark:text-white text-sm shadow-inner font-bold" 
                     placeholder="EX: TRACTEUR AVION" 
@@ -1790,14 +1804,19 @@ export default function App() {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Zone d'Affectation</label>
-                  <select 
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Zone d'Affectation
+                    {TRACTEUR_DESIGNATIONS.includes(form.designation.trim()) && (
+                      <span className="ml-2 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded text-[8px] font-black border border-amber-200 dark:border-amber-800/30 normal-case tracking-normal">Tracteur — zones étendues</span>
+                    )}
+                  </label>
+                  <select
                     value={form.zone} onChange={e => setForm({...form, zone: e.target.value})}
                     className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none appearance-none cursor-pointer dark:text-white text-sm font-medium shadow-inner"
                   >
-                    <option value="PISTE">PISTE</option>
-                    <option value="GSE">GSE</option>
-                    <option value="ANTENNE PISTE">ANTENNE PISTE</option>
+                    {getZonesForDesignation(form.designation).map(z => (
+                      <option key={z} value={z}>{z}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-1.5">
