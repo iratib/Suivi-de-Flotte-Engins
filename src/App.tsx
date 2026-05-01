@@ -77,6 +77,8 @@ interface HistoryItem {
   zone: string;
   etat: string;
   observation: string;
+  action: string;
+  editeur: string;
 }
 
 // Formate une valeur date gviz (ex: "Date(2026,4,1,1,7,40)") → "01/05/2026 01:07"
@@ -522,7 +524,9 @@ export default function App() {
         numEngin:    row[2] || 'N/A',
         zone:        row[3] || 'INCONNU',
         etat:        row[4] || 'INCONNU',
-        observation: row[5] || ''
+        observation: row[5] || '',
+        action:      row[6] || '',
+        editeur:     row[7] || ''
       })).reverse();
 
       setHistoryData(mappedHistory);
@@ -566,6 +570,7 @@ export default function App() {
     }
 
     setSubmitting(true);
+    const editorId = mySession?.name || (userRole === 'admin' ? 'Admin' : 'Viewer');
     try {
       const values = [form.designation, form.numEngin, form.zone, form.etat, form.observation];
 
@@ -581,14 +586,14 @@ export default function App() {
         })
       });
 
-      // Ajout dans Historique
+      // Ajout dans Historique avec action + éditeur
       await fetch(APPS_SCRIPT_URL, {
         method: 'POST',
         mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sheet: 'Historique',
-          values
+          values: [...values, isEdit ? 'Modification' : 'Ajout', editorId]
         })
       });
 
@@ -633,10 +638,19 @@ export default function App() {
   const confirmRetire = () => {
     if (!retireTarget) return;
     if (!retireObs.trim()) { alert('L\'observation est obligatoire pour justifier le retrait de l\'engin.'); return; }
+    const editorId = mySession?.name || (userRole === 'admin' ? 'Admin' : 'Viewer');
     statutOverrides.current.set(retireTarget.rowIndex!, 'Retiré');
     setData(prev => prev.map(d => d.rowIndex === retireTarget.rowIndex ? { ...d, statut: 'Retiré', observation: retireObs.trim() } : d));
     fetch(`${APPS_SCRIPT_URL}?action=retire&sheet=Feuille%201&rowIndex=${retireTarget.rowIndex}&observation=${encodeURIComponent(retireObs.trim())}`, { method: 'GET', mode: 'no-cors' })
       .catch(() => {});
+    // Historique du retrait
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sheet: 'Historique',
+        values: [retireTarget.designation, retireTarget.numEngin, retireTarget.zone, retireTarget.etat, retireObs.trim(), 'Retrait', editorId]
+      })
+    }).catch(() => {});
     setRetireTarget(null);
     setRetireObs('');
   };
@@ -655,10 +669,19 @@ export default function App() {
   };
 
   const handleRestore = async (item: SheetData) => {
+    const editorId = mySession?.name || (userRole === 'admin' ? 'Admin' : 'Viewer');
     statutOverrides.current.set(item.rowIndex!, 'Actif');
     setData(prev => prev.map(d => d.rowIndex === item.rowIndex ? { ...d, statut: 'Actif' } : d));
     fetch(`${APPS_SCRIPT_URL}?action=restore&sheet=Feuille%201&rowIndex=${item.rowIndex}`, { method: 'GET', mode: 'no-cors' })
       .catch(() => {});
+    // Historique de la restauration
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sheet: 'Historique',
+        values: [item.designation, item.numEngin, item.zone, item.etat, item.observation || '', 'Restauration', editorId]
+      })
+    }).catch(() => {});
   };
 
   const activeData = data.filter(item => item.statut !== 'Retiré');
@@ -1066,15 +1089,25 @@ export default function App() {
                           <thead className="sticky top-0 bg-white dark:bg-slate-900 shadow-sm z-10">
                             <tr className="text-[10px] uppercase tracking-wider text-slate-500 font-bold border-b border-slate-100 dark:border-slate-800">
                               <th className="px-6 py-4">Date & Heure</th>
-                              <th className="px-6 py-4 text-center">État</th>
-                              <th className="px-6 py-4 text-center">Zone</th>
-                              <th className="px-6 py-4">Observations / Détails techniques</th>
+                              <th className="px-4 py-4 text-center">Action</th>
+                              <th className="px-4 py-4 text-center">État</th>
+                              <th className="px-4 py-4 text-center">Zone</th>
+                              <th className="px-4 py-4 text-center">Éditeur</th>
+                              <th className="px-6 py-4">Observations</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                             {historyData
                               .filter(h => h.numEngin === selectedHistoryNum)
-                              .map((item, idx) => (
+                              .map((item, idx) => {
+                                const actionColors: Record<string, string> = {
+                                  'Ajout':         'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-100 dark:border-blue-900/30',
+                                  'Modification':  'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-100 dark:border-amber-900/30',
+                                  'Retrait':       'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-100 dark:border-rose-900/30',
+                                  'Restauration':  'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30',
+                                };
+                                const actionCls = actionColors[item.action] || 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-700';
+                                return (
                                 <tr key={idx} className="hover:bg-white dark:hover:bg-slate-800/40 transition-colors">
                                   <td className="px-6 py-4">
                                     <div className="font-mono text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-2">
@@ -1082,23 +1115,34 @@ export default function App() {
                                       {item.timestamp}
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4 text-center">
+                                  <td className="px-4 py-4 text-center">
+                                    {item.action ? (
+                                      <span className={`px-2 py-0.5 rounded text-[9px] font-black border ${actionCls}`}>{item.action}</span>
+                                    ) : <span className="text-slate-300 dark:text-slate-600 text-[10px]">—</span>}
+                                  </td>
+                                  <td className="px-4 py-4 text-center">
                                     <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${
-                                      item.etat === 'OK' 
-                                        ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30' 
+                                      item.etat === 'OK'
+                                        ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30'
                                         : 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-100 dark:border-rose-900/30'
                                     }`}>
                                       {item.etat}
                                     </span>
                                   </td>
-                                  <td className="px-6 py-4 text-center text-[10px] font-bold text-slate-500">
+                                  <td className="px-4 py-4 text-center text-[10px] font-bold text-slate-500">
                                     {item.zone}
+                                  </td>
+                                  <td className="px-4 py-4 text-center">
+                                    {item.editeur ? (
+                                      <span className="px-2 py-0.5 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400 border border-violet-100 dark:border-violet-900/30 rounded text-[9px] font-black">{item.editeur}</span>
+                                    ) : <span className="text-slate-300 dark:text-slate-600 text-[10px]">—</span>}
                                   </td>
                                   <td className="px-6 py-4 text-xs italic text-slate-500 dark:text-slate-400">
                                     {item.observation || "Aucune observation particulière"}
                                   </td>
                                 </tr>
-                              ))}
+                                );
+                              })}
                           </tbody>
                         </table>
                       </div>
@@ -1116,11 +1160,15 @@ export default function App() {
                             okCount: 0,
                             hsCount: 0,
                             lastUpdate: item.timestamp,
+                            lastAction: item.action,
+                            lastEditeur: item.editeur,
                             currentStatus: item.etat
                           };
                         }
                         const s = acc[key];
                         s.events += 1;
+                        s.lastAction = item.action;
+                        s.lastEditeur = item.editeur;
                         if (item.etat === 'OK') s.okCount += 1;
                         if (item.etat === 'HS') s.hsCount += 1;
                         return acc;
@@ -1155,9 +1203,18 @@ export default function App() {
                             </div>
                           </div>
                           <div className="p-4 bg-slate-900/50 space-y-3">
-                            <div className="flex items-center gap-2 text-slate-500 text-[9px] font-bold">
-                              <Clock className="w-3 h-3" />
-                              <span>{s.lastUpdate}</span>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 text-slate-500 text-[9px] font-bold">
+                                <Clock className="w-3 h-3" />
+                                <span>{s.lastUpdate}</span>
+                              </div>
+                              {s.lastEditeur && (
+                                <span className="px-2 py-0.5 bg-violet-900/30 text-violet-400 border border-violet-800/30 rounded text-[9px] font-black flex items-center gap-1">
+                                  <Users className="w-2.5 h-2.5" />
+                                  {s.lastEditeur}
+                                  {s.lastAction && <span className="text-violet-500/70 font-bold"> · {s.lastAction}</span>}
+                                </span>
+                              )}
                             </div>
                             <div className={`flex items-center gap-2 text-xs font-black p-2 rounded-lg ${s.currentStatus === 'OK' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
                               {s.currentStatus === 'OK' ? (
