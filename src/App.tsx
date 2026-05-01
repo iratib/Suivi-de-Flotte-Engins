@@ -1185,22 +1185,38 @@ export default function App() {
                   </div>
 
                   {/* Zone section */}
-                  <div>
-                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 pl-1">Répartition par Zone</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      {stats.zoneData.map((zone, i) => (
-                        <div key={i} className="bg-slate-100 dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-black">
-                            {zone.value}
-                          </div>
-                          <div>
-                            <div className="text-[10px] font-black text-slate-400 uppercase leading-none">{zone.name}</div>
-                            <div className="text-sm font-bold text-slate-800 dark:text-white">Engins affectés</div>
-                          </div>
+                  {(() => {
+                    const FIXED_ZONES = ['PISTE', 'ANTENNE PISTE', 'GSE', 'T1', 'T2', 'LIVRAISON', 'FRET', 'RAVITAILLEMENT', 'CORRESPONDANCE'];
+                    const zoneMap = Object.fromEntries(stats.zoneData.map(z => [z.name.toUpperCase(), z.value]));
+                    const t3Count = zoneMap['T3'] ?? 0;
+                    const displayZones = [
+                      ...FIXED_ZONES.map(name => ({ name, value: zoneMap[name.toUpperCase()] ?? 0, fixed: true })),
+                      ...(t3Count > 0 ? [{ name: 'T3', value: t3Count, fixed: false }] : []),
+                    ];
+                    return (
+                      <div>
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 pl-1">Répartition par Zone</h3>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                          {displayZones.map((zone) => {
+                            const isEmpty = zone.value === 0;
+                            return (
+                              <div key={zone.name} className={`bg-white dark:bg-slate-800 p-4 rounded-xl border flex items-center gap-3 transition-all ${isEmpty ? 'border-rose-200 dark:border-rose-900/40' : 'border-slate-200 dark:border-slate-700'}`}>
+                                <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-black text-sm ${isEmpty ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400' : 'bg-indigo-600 text-white'}`}>
+                                  {zone.value}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none truncate">{zone.name}</div>
+                                  <div className={`text-[11px] font-bold mt-0.5 ${isEmpty ? 'text-rose-500 dark:text-rose-400' : 'text-slate-700 dark:text-slate-200'}`}>
+                                    {isEmpty ? 'Aucun engin' : 'Engins affectés'}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ── Performance par Type d'Engin — Gauge Charts ── */}
                   {stats.typeDetailedData.length > 0 && (
