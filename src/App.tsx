@@ -454,11 +454,17 @@ export default function App() {
     };
   }, []);
 
-  // Nettoyer la session de cet onglet à la fermeture
+  // Nettoyer la session uniquement à la fermeture (pas au rafraîchissement)
   useEffect(() => {
-    const cleanup = () => { if (mySessionIdRef.current) removeSession(mySessionIdRef.current); };
-    window.addEventListener('beforeunload', cleanup);
-    return () => window.removeEventListener('beforeunload', cleanup);
+    const cleanup = () => {
+      // pagehide avec persisted=false = fermeture réelle (pas un refresh/navigation)
+      if (mySessionIdRef.current) removeSession(mySessionIdRef.current);
+    };
+    const onPageHide = (e: PageTransitionEvent) => {
+      if (!e.persisted) cleanup();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
   }, []);
 
   const [form, setForm] = useState({
