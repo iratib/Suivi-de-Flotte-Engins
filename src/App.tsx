@@ -144,6 +144,13 @@ interface ActiveSession {
   loginTime: string;
 }
 
+// Retourne la date/heure courante au format dd/MM/yyyy HH:mm (stocké dans Historique col A)
+const fmtNow = (): string => {
+  const n = new Date();
+  const p = (v: number) => String(v).padStart(2, '0');
+  return `${p(n.getDate())}/${p(n.getMonth() + 1)}/${n.getFullYear()} ${p(n.getHours())}:${p(n.getMinutes())}`;
+};
+
 // Parse la réponse gviz/tq de Google Sheets
 const parseGviz = (text: string): string[][] => {
   try {
@@ -519,10 +526,10 @@ export default function App() {
       const rows = parseGviz(text);
 
       const mappedHistory: HistoryItem[] = rows.map((row) => ({
-        timestamp:   formatDate(row[0] || ''),
+        timestamp:   row[0] || '',        // dd/MM/yyyy HH:mm — envoyé par le frontend
         designation: row[1] || 'Sans nom',
         numEngin:    row[2] || 'N/A',
-        zone:        row[3] || 'INCONNU',
+        zone:        row[3] || '',
         etat:        row[4] || 'INCONNU',
         observation: row[5] || '',
         action:      row[6] || '',
@@ -593,7 +600,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sheet: 'Historique',
-          values: [...values, isEdit ? 'Modification' : 'Ajout', editorId]
+          values: [fmtNow(), ...values, isEdit ? 'Modification' : 'Ajout', editorId]
         })
       });
 
@@ -648,7 +655,7 @@ export default function App() {
       method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sheet: 'Historique',
-        values: [retireTarget.designation, retireTarget.numEngin, retireTarget.zone, retireTarget.etat, retireObs.trim(), 'Retrait', editorId]
+        values: [fmtNow(), retireTarget.designation, retireTarget.numEngin, retireTarget.zone, retireTarget.etat, retireObs.trim(), 'Retrait', editorId]
       })
     }).catch(() => {});
     setRetireTarget(null);
@@ -679,7 +686,7 @@ export default function App() {
       method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sheet: 'Historique',
-        values: [item.designation, item.numEngin, item.zone, item.etat, item.observation || '', 'Restauration', editorId]
+        values: [fmtNow(), item.designation, item.numEngin, item.zone, item.etat, item.observation || '', 'Restauration', editorId]
       })
     }).catch(() => {});
   };
