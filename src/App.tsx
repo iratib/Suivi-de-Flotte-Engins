@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { 
-  Search, 
-  FileText, 
-  CheckCircle2, 
-  Edit3, 
-  PlusCircle, 
+import {
+  Search,
+  FileText,
+  CheckCircle2,
+  Edit3,
+  PlusCircle,
   Info,
   Clock,
   Database,
@@ -22,9 +22,10 @@ import {
   Calendar,
   LayoutDashboard,
   BarChart3,
-  Lock
+  Lock,
+  Trash2
 } from 'lucide-react';
-import { useState, useEffect, useMemo, FormEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { 
   BarChart, 
@@ -49,7 +50,7 @@ const URL_FLOTTE   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq
 const URL_HISTORY  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique`;
 
 // Apps Script URL pour l'écriture — remplace par ton URL après déploiement Apps Script
-const APPS_SCRIPT_URL = 'COLLE_TON_URL_APPS_SCRIPT_ICI';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz_q2pVSMWyqu02JsbTVvlO8ceLP4XFMN-P5hVlcxeu7V5st9efTHpDMumw0lsiRMO3/exec';
 // ============================================================
 
 interface SheetData {
@@ -58,6 +59,7 @@ interface SheetData {
   zone: string;
   etat: string;
   observation: string;
+  statut: string;
   statusType: 'active' | 'warning' | 'error';
   rowIndex?: number;
 }
@@ -70,6 +72,22 @@ interface HistoryItem {
   etat: string;
   observation: string;
 }
+
+// Formate une valeur date gviz (ex: "Date(2026,4,1,1,7,40)") → "01/05/2026 01:07"
+// Gère aussi les chaînes déjà formatées venant de l'Apps Script
+const formatDate = (value: string): string => {
+  const gviz = value.match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+))?/);
+  if (gviz) {
+    const d  = String(parseInt(gviz[3])).padStart(2, '0');
+    const m  = String(parseInt(gviz[2]) + 1).padStart(2, '0'); // 0-indexé
+    const y  = gviz[1];
+    const hh = String(parseInt(gviz[4] || '0')).padStart(2, '0');
+    const mm = String(parseInt(gviz[5] || '0')).padStart(2, '0');
+    return `${d}/${m}/${y} ${hh}:${mm}`;
+  }
+  // Chaîne Apps Script "dd/MM/yyyy HH:mm:ss" → supprimer les secondes
+  return value.replace(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}):\d{2}/, '$1');
+};
 
 // Parse la réponse gviz/tq de Google Sheets
 const parseGviz = (text: string): string[][] => {
@@ -88,9 +106,10 @@ const parseGviz = (text: string): string[][] => {
 };
 
 export default function App() {
+  const statutOverrides = useRef<Map<number, string>>(new Map());
   const [data, setData] = useState<SheetData[]>([]);
   const [historyData, setHistoryData] = useState<HistoryItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'flotte' | 'historique' | 'dashboard' | 'stats'>('flotte');
+  const [activeTab, setActiveTab] = useState<'flotte' | 'historique' | 'dashboard' | 'stats' | 'outofparc'>('flotte');
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -176,15 +195,21 @@ export default function App() {
       const text = await response.text();
       const rows = parseGviz(text);
 
-      const mappedData: SheetData[] = rows.map((row, idx) => ({
-        designation: row[0] || 'Sans nom',
-        numEngin:    row[1] || 'N/A',
-        zone:        row[2] || 'INCONNU',
-        etat:        row[3] || 'INCONNU',
-        observation: row[4] || '',
-        statusType:  getStatusType(row[3]),
-        rowIndex:    idx + 2
-      }));
+      const mappedData: SheetData[] = rows.map((row, idx) => {
+        const rowIndex = idx + 2;
+        const fetchedStatut = row[5] || 'Actif';
+        const statut = statutOverrides.current.get(rowIndex) ?? fetchedStatut;
+        return {
+          designation: row[0] || 'Sans nom',
+          numEngin:    row[1] || 'N/A',
+          zone:        row[2] || 'INCONNU',
+          etat:        row[3] || 'INCONNU',
+          observation: row[4] || '',
+          statut,
+          statusType:  getStatusType(row[3]),
+          rowIndex
+        };
+      });
 
       setData(mappedData);
       setCurrentTime(new Date().toLocaleString());
@@ -208,7 +233,7 @@ export default function App() {
       const rows = parseGviz(text);
 
       const mappedHistory: HistoryItem[] = rows.map((row) => ({
-        timestamp:   row[0] || '',
+        timestamp:   formatDate(row[0] || ''),
         designation: row[1] || 'Sans nom',
         numEngin:    row[2] || 'N/A',
         zone:        row[3] || 'INCONNU',
@@ -246,7 +271,7 @@ export default function App() {
         mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sheet: 'Feuil1',
+          sheet: 'Feuille 1',
           values,
           rowIndex: isEdit ? editingRow : null
         })
@@ -296,19 +321,43 @@ export default function App() {
     setEditingRow(null);
   };
 
-  const filteredData = data.filter(item => 
+  const handleDelete = async (item: SheetData) => {
+    if (!confirm(`Retirer "${item.designation} (${item.numEngin})" de la flotte active ?`)) return;
+    statutOverrides.current.set(item.rowIndex!, 'Retiré');
+    setData(prev => prev.map(d => d.rowIndex === item.rowIndex ? { ...d, statut: 'Retiré' } : d));
+    fetch(`${APPS_SCRIPT_URL}?action=retire&sheet=Feuille%201&rowIndex=${item.rowIndex}`, { method: 'GET', mode: 'no-cors' })
+      .catch(() => {});
+  };
+
+  const handleRestore = async (item: SheetData) => {
+    statutOverrides.current.set(item.rowIndex!, 'Actif');
+    setData(prev => prev.map(d => d.rowIndex === item.rowIndex ? { ...d, statut: 'Actif' } : d));
+    fetch(`${APPS_SCRIPT_URL}?action=restore&sheet=Feuille%201&rowIndex=${item.rowIndex}`, { method: 'GET', mode: 'no-cors' })
+      .catch(() => {});
+  };
+
+  const activeData = data.filter(item => item.statut !== 'Retiré');
+  const retiredData = data.filter(item => item.statut === 'Retiré');
+
+  const filteredData = activeData.filter(item =>
+    item.designation.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    item.numEngin.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const filteredRetired = retiredData.filter(item =>
     item.designation.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.numEngin.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const stats = useMemo(() => {
-    const total = data.length;
-    const ok = data.filter(i => i.etat === 'OK').length;
-    const hs = data.filter(i => i.etat === 'HS').length;
+    const active = data.filter(i => i.statut !== 'Retiré');
+    const total = active.length;
+    const ok = active.filter(i => i.etat === 'OK').length;
+    const hs = active.filter(i => i.etat === 'HS').length;
     const maintenance = total - ok - hs;
     const okPercentage = total > 0 ? Math.round((ok / total) * 100) : 0;
 
-    const zoneDetails = data.reduce((acc, item) => {
+    const zoneDetails = active.reduce((acc, item) => {
       if (!acc[item.zone]) acc[item.zone] = { total: 0, ok: 0, hs: 0 };
       acc[item.zone].total += 1;
       if (item.etat === 'OK') acc[item.zone].ok += 1;
@@ -339,7 +388,7 @@ export default function App() {
       <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 shrink-0 shadow-sm z-10 transition-colors duration-300">
         <div className="flex items-center gap-3">
           <img 
-            src="/images/logo.png" 
+            src={`${import.meta.env.BASE_URL}images/logo.png`}
             alt="Suivi de Flotte Engins" 
             className="w-10 h-10 rounded-lg shadow-md shadow-blue-500/20 object-contain bg-white/20 p-1"
           />
@@ -427,12 +476,22 @@ export default function App() {
                   <BarChart3 className="w-4 h-4" />
                   <h2 className="font-bold text-sm">Statistiques</h2>
                 </button>
-                <button 
+                <button
                   onClick={() => { setActiveTab('historique'); fetchHistory(); }}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all shrink-0 ${activeTab === 'historique' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
                 >
                   <Clock className="w-4 h-4" />
                   <h2 className="font-bold text-sm">Historique</h2>
+                </button>
+                <button
+                  onClick={() => setActiveTab('outofparc')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all shrink-0 ${activeTab === 'outofparc' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                >
+                  <Lock className="w-4 h-4" />
+                  <h2 className="font-bold text-sm">Out of Parc</h2>
+                  {retiredData.length > 0 && (
+                    <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none">{retiredData.length}</span>
+                  )}
                 </button>
               </div>
               <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -533,13 +592,22 @@ export default function App() {
                             </td>
                             {userRole === 'admin' && (
                               <td className="px-6 py-4 text-center">
-                                <button 
-                                  onClick={() => handleEdit(item)}
-                                  className="text-blue-600 dark:text-blue-400 hover:text-white dark:hover:text-white hover:bg-blue-600 dark:hover:bg-blue-500 border border-transparent hover:border-blue-700 dark:hover:border-blue-400 font-black text-[10px] px-3 py-1.5 rounded uppercase tracking-tighter transition-all flex items-center gap-1.5 mx-auto"
-                                >
-                                  <Edit3 className="w-3 h-3" />
-                                  Editer
-                                </button>
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => handleEdit(item)}
+                                    className="text-blue-600 dark:text-blue-400 hover:text-white dark:hover:text-white hover:bg-blue-600 dark:hover:bg-blue-500 border border-transparent hover:border-blue-700 dark:hover:border-blue-400 font-black text-[10px] px-3 py-1.5 rounded uppercase tracking-tighter transition-all flex items-center gap-1.5"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                    Editer
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(item)}
+                                    className="text-rose-500 dark:text-rose-400 hover:text-white dark:hover:text-white hover:bg-rose-600 dark:hover:bg-rose-500 border border-transparent hover:border-rose-700 dark:hover:border-rose-400 font-black text-[10px] px-3 py-1.5 rounded uppercase tracking-tighter transition-all flex items-center gap-1.5"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    Suppr.
+                                  </button>
+                                </div>
                               </td>
                             )}
                           </tr>
@@ -863,6 +931,79 @@ export default function App() {
                       </table>
                     </div>
                   </div>
+                </div>
+              ) : activeTab === 'outofparc' ? (
+                <div className="flex flex-col h-full">
+                  {/* Header */}
+                  <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-800 dark:bg-slate-950">
+                    <div className="flex items-center gap-3">
+                      <Lock className="w-4 h-4 text-slate-400" />
+                      <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-wide">Engins Retirés du Parc</h3>
+                        <p className="text-[10px] text-slate-400 font-mono">{retiredData.length} engin{retiredData.length > 1 ? 's' : ''} archivé{retiredData.length > 1 ? 's' : ''}</p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-full text-[10px] font-black uppercase tracking-widest">Out of Service</span>
+                  </div>
+
+                  {filteredRetired.length === 0 ? (
+                    <div className="flex-grow flex flex-col items-center justify-center text-center p-8">
+                      <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                        <Lock className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                      </div>
+                      <p className="text-sm font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">Aucun engin retiré</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-600 mt-1">Les engins retirés de la flotte active apparaîtront ici.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-auto flex-grow h-0">
+                      <table className="w-full text-left border-collapse min-w-[700px]">
+                        <thead className="sticky top-0 bg-slate-800 dark:bg-slate-950 z-10">
+                          <tr className="text-[10px] uppercase tracking-wider text-slate-400 font-bold border-b border-slate-700">
+                            <th className="px-6 py-3">Désignation</th>
+                            <th className="px-6 py-3">N° Engin</th>
+                            <th className="px-6 py-3 text-center">Zone</th>
+                            <th className="px-6 py-3 text-center">Dernier État</th>
+                            <th className="px-6 py-3">Observations</th>
+                            {userRole === 'admin' && <th className="px-6 py-3 text-center">Action</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                          {filteredRetired.map((item, idx) => (
+                            <tr key={idx} className="bg-slate-900 hover:bg-slate-800/80 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="font-bold text-slate-300">{item.designation}</div>
+                              </td>
+                              <td className="px-6 py-4 font-mono text-[11px] text-slate-500">{item.numEngin}</td>
+                              <td className="px-6 py-4 text-center">
+                                <span className="px-2 py-0.5 bg-slate-800 text-slate-500 rounded text-[10px] font-bold border border-slate-700">{item.zone}</span>
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <span className={`px-3 py-1 rounded text-[10px] font-black tracking-wide inline-flex items-center gap-1.5 opacity-60
+                                  ${item.statusType === 'active' ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-900/30' : ''}
+                                  ${item.statusType === 'warning' ? 'bg-amber-950/30 text-amber-400 border border-amber-900/30' : ''}
+                                  ${item.statusType === 'error' ? 'bg-rose-950/30 text-rose-400 border border-rose-900/30' : ''}
+                                `}>
+                                  {item.etat}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 italic text-slate-600 text-xs truncate max-w-[180px]">{item.observation || '-'}</td>
+                              {userRole === 'admin' && (
+                                <td className="px-6 py-4 text-center">
+                                  <button
+                                    onClick={() => handleRestore(item)}
+                                    className="text-emerald-400 hover:text-white hover:bg-emerald-600 border border-transparent hover:border-emerald-500 font-black text-[10px] px-3 py-1.5 rounded uppercase tracking-tighter transition-all flex items-center gap-1.5 mx-auto"
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                    Restaurer
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               ) : null}
             </div>
