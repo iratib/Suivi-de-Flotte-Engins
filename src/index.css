@@ -2,6 +2,11 @@
 
 @variant dark (&:where(.dark, .dark *));
 
+/* Disable pull-to-refresh on mobile PWA */
+html, body {
+  overscroll-behavior: none;
+}
+
 @utility scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;

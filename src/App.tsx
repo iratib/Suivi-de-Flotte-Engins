@@ -792,7 +792,7 @@ export default function App() {
   }, [data, dashZoneFilter]);
 
   return (
-    <div className="bg-slate-50 dark:bg-slate-950 min-h-screen flex flex-col font-sans text-slate-900 dark:text-slate-100 selection:bg-blue-100 dark:selection:bg-blue-900/30 selection:text-blue-900 dark:selection:text-blue-100 transition-colors duration-300">
+    <div className="bg-slate-50 dark:bg-slate-950 min-h-screen flex flex-col font-sans text-slate-900 dark:text-slate-100 selection:bg-blue-100 dark:selection:bg-blue-900/30 selection:text-blue-900 dark:selection:text-blue-100 transition-colors duration-300 overscroll-none">
       {/* PWA update notification */}
       {needRefresh && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-blue-600 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-xl shadow-blue-900/30 animate-bounce-in">
@@ -814,109 +814,173 @@ export default function App() {
         </div>
       )}
       {/* Header */}
-      <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 shrink-0 shadow-sm z-10 transition-colors duration-300">
-        <div className="flex items-center gap-3">
-          <img 
-            src={`${import.meta.env.BASE_URL}images/logo.png`}
-            alt="Suivi de Flotte Engins" 
-            className="w-10 h-10 rounded-lg shadow-md shadow-blue-500/20 object-contain bg-white/20 p-1"
-          />
-          <div>
-            <h1 className="text-lg font-bold text-slate-800 dark:text-white leading-tight">Suivi de Flotte Engins</h1>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-[0.15em]">
-              Interface Aéroportuaire — Google Sheets Sync
-            </p>
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 shadow-sm z-10 transition-colors duration-300">
+
+        {/* ── Row 1 : logo + primary action icons ── */}
+        <div className="flex items-center justify-between px-4 md:px-8 h-14 md:h-16">
+
+          {/* Logo + title */}
+          <div className="flex items-center gap-2.5">
+            <img
+              src={`${import.meta.env.BASE_URL}images/logo.png`}
+              alt="Suivi de Flotte Engins"
+              className="w-8 h-8 md:w-10 md:h-10 rounded-lg shadow-md shadow-blue-500/20 object-contain bg-white/20 p-1 shrink-0"
+            />
+            <div>
+              <h1 className="text-sm md:text-lg font-bold text-slate-800 dark:text-white leading-tight">Suivi de Flotte Engins</h1>
+              <p className="hidden md:block text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-[0.15em]">
+                Interface Aéroportuaire — Google Sheets Sync
+              </p>
+            </div>
+          </div>
+
+          {/* Right cluster */}
+          <div className="flex items-center gap-1.5 md:gap-6">
+
+            {/* Live status — desktop only */}
+            <div className="hidden md:flex items-center gap-2.5 px-4 py-1.5 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/20 rounded-full">
+              <div className={`w-2 h-2 rounded-full ${loading ? 'bg-slate-300' : 'bg-emerald-500 animate-pulse ring-4 ring-emerald-500/20'}`} />
+              <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 tracking-tight">
+                {loading ? 'Synchronisation...' : 'Live Data Feed'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 md:gap-3 md:border-l md:border-slate-200 md:dark:border-slate-800 md:pl-6">
+              {mySession ? (
+                <>
+                  {/* Desktop only: shift + date + name */}
+                  <div className="hidden md:flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black border ${mySession.shift === 'Journée' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/30' : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/30'}`}>
+                      {mySession.shift === 'Journée' ? <Sunrise className="w-2.5 h-2.5 inline mr-0.5" /> : <MoonIcon className="w-2.5 h-2.5 inline mr-0.5" />}
+                      {mySession.shift}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{formatDisplayDate(mySession.date)}</span>
+                  </div>
+                  {/* Desktop only: users management */}
+                  {mySession.role === 'admin' && (
+                    <button onClick={() => { setNewEditorForm({ id: '', password: '', confirmPassword: '' }); setNewEditorError(''); setShowUserManagementModal(true); }}
+                      className="hidden md:flex p-2 text-slate-400 dark:text-slate-500 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-lg transition-all"
+                      title="Gérer les utilisateurs">
+                      <Users className="w-4 h-4" />
+                    </button>
+                  )}
+                  {/* Always visible */}
+                  <button onClick={() => setIsDarkMode(!isDarkMode)}
+                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                    title={isDarkMode ? "Mode clair" : "Mode sombre"}>
+                    {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                  </button>
+                  <button onClick={fetchData}
+                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                    title="Rafraîchir">
+                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  </button>
+                  {/* Desktop only: name + role text */}
+                  <div className="text-right hidden md:block">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{mySession.name}</p>
+                    <p className={`text-[10px] font-black uppercase tracking-wide ${mySession.role === 'admin' ? 'text-blue-500' : 'text-violet-500'}`}>
+                      {mySession.role === 'admin' ? 'Administrateur' : 'Éditeur'}
+                    </p>
+                  </div>
+                  {/* Always visible: avatar */}
+                  <div className={`w-8 h-8 md:w-9 md:h-9 rounded-full flex items-center justify-center text-xs font-black text-white shadow-inner ${mySession.role === 'admin' ? 'bg-blue-600' : 'bg-violet-600'}`}>
+                    {mySession.name[0].toUpperCase()}
+                  </div>
+                  {/* Always visible: logout */}
+                  <button onClick={handleLogout}
+                    className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
+                    title="Se déconnecter">
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Desktop only: role switcher (mobile version is in Row 2) */}
+                  <div className="hidden md:flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <button onClick={() => handleRoleSwitch('admin')}
+                      className="px-3 py-1 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-blue-600 hover:bg-white dark:hover:bg-slate-700">
+                      ADMIN
+                    </button>
+                    <button onClick={() => handleRoleSwitch('editor')}
+                      className="px-3 py-1 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-violet-600 hover:bg-white dark:hover:bg-slate-700">
+                      ÉDITEUR
+                    </button>
+                    <button onClick={() => handleRoleSwitch('viewer')}
+                      className="px-3 py-1 text-[10px] font-black rounded-md transition-all bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 shadow-sm ring-1 ring-slate-200 dark:ring-slate-600">
+                      LECTURE
+                    </button>
+                  </div>
+                  {/* Always visible */}
+                  <button onClick={() => setIsDarkMode(!isDarkMode)}
+                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                    title={isDarkMode ? "Mode clair" : "Mode sombre"}>
+                    {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                  </button>
+                  <button onClick={fetchData}
+                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
+                    title="Rafraîchir">
+                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  </button>
+                  {/* Desktop only: "Non connecté" text */}
+                  <div className="text-right hidden md:block">
+                    <p className="text-xs font-bold text-slate-400 dark:text-slate-500">Non connecté</p>
+                    <p className="text-[10px] font-medium text-slate-300 dark:text-slate-600">Mode lecture</p>
+                  </div>
+                  {/* Always visible: anonymous avatar */}
+                  <div className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shadow-inner">
+                    <User className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
- 
-        <div className="flex items-center gap-6">
-          <div className="hidden sm:flex items-center gap-2.5 px-4 py-1.5 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/20 rounded-full">
-            <div className={`w-2 h-2 rounded-full ${loading ? 'bg-slate-300' : 'bg-emerald-500 animate-pulse ring-4 ring-emerald-500/20'}`} />
-            <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 tracking-tight">
-              {loading ? 'Synchronisation...' : 'Live Data Feed'}
-            </span>
-          </div>
-          
-          <div className="flex items-center gap-3 border-l border-slate-200 dark:border-slate-800 pl-6">
-            {mySession ? (
-              <>
-                {/* Connected user info */}
-                <div className="hidden md:flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black border ${mySession.shift === 'Journée' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/30' : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/30'}`}>
-                    {mySession.shift === 'Journée' ? <Sunrise className="w-2.5 h-2.5 inline mr-0.5" /> : <MoonIcon className="w-2.5 h-2.5 inline mr-0.5" />}
-                    {mySession.shift}
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{formatDisplayDate(mySession.date)}</span>
-                </div>
+
+        {/* ── Row 2 : mobile only ── */}
+        <div className="md:hidden border-t border-slate-100 dark:border-slate-800 px-3 py-2">
+          {mySession ? (
+            /* Session info: shift + date + name + admin action */
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black border ${mySession.shift === 'Journée' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/30' : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/30'}`}>
+                  {mySession.shift === 'Journée' ? <Sunrise className="w-2.5 h-2.5 inline mr-0.5" /> : <MoonIcon className="w-2.5 h-2.5 inline mr-0.5" />}
+                  {mySession.shift}
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{formatDisplayDate(mySession.date)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{mySession.name}</span>
+                <span className={`text-[9px] font-black uppercase tracking-wide ${mySession.role === 'admin' ? 'text-blue-500' : 'text-violet-500'}`}>
+                  {mySession.role === 'admin' ? 'Admin' : 'Éditeur'}
+                </span>
                 {mySession.role === 'admin' && (
                   <button onClick={() => { setNewEditorForm({ id: '', password: '', confirmPassword: '' }); setNewEditorError(''); setShowUserManagementModal(true); }}
-                    className="p-2 text-slate-400 dark:text-slate-500 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-lg transition-all"
+                    className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-lg transition-all"
                     title="Gérer les utilisateurs">
-                    <Users className="w-4 h-4" />
+                    <Users className="w-3.5 h-3.5" />
                   </button>
                 )}
-                <button onClick={() => setIsDarkMode(!isDarkMode)}
-                  className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-                  title={isDarkMode ? "Mode clair" : "Mode sombre"}>
-                  {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                </button>
-                <button onClick={fetchData}
-                  className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-                  title="Rafraîchir">
-                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                </button>
-                <div className="text-right hidden md:block">
-                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{mySession.name}</p>
-                  <p className={`text-[10px] font-black uppercase tracking-wide ${mySession.role === 'admin' ? 'text-blue-500' : 'text-violet-500'}`}>
-                    {mySession.role === 'admin' ? 'Administrateur' : 'Éditeur'}
-                  </p>
-                </div>
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black text-white shadow-inner ${mySession.role === 'admin' ? 'bg-blue-600' : 'bg-violet-600'}`}>
-                  {mySession.name[0].toUpperCase()}
-                </div>
-                <button onClick={handleLogout}
-                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
-                  title="Se déconnecter">
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                  <button onClick={() => handleRoleSwitch('admin')}
-                    className="px-3 py-1 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-blue-600 hover:bg-white dark:hover:bg-slate-700">
-                    ADMIN
-                  </button>
-                  <button onClick={() => handleRoleSwitch('editor')}
-                    className="px-3 py-1 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-violet-600 hover:bg-white dark:hover:bg-slate-700">
-                    ÉDITEUR
-                  </button>
-                  <button onClick={() => handleRoleSwitch('viewer')}
-                    className="px-3 py-1 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-slate-600 hover:bg-white dark:hover:bg-slate-700">
-                    LECTURE
-                  </button>
-                </div>
-                <button onClick={() => setIsDarkMode(!isDarkMode)}
-                  className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-                  title={isDarkMode ? "Mode clair" : "Mode sombre"}>
-                  {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                </button>
-                <button onClick={fetchData}
-                  className="p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
-                  title="Rafraîchir">
-                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                </button>
-                <div className="text-right hidden md:block">
-                  <p className="text-xs font-bold text-slate-400 dark:text-slate-500">Non connecté</p>
-                  <p className="text-[10px] font-medium text-slate-300 dark:text-slate-600">Mode lecture</p>
-                </div>
-                <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shadow-inner">
-                  <User className="w-4 h-4 text-slate-400 dark:text-slate-500" />
-                </div>
-              </>
-            )}
-          </div>
+              </div>
+            </div>
+          ) : (
+            /* Role switcher — full width on mobile */
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 w-full">
+              <button onClick={() => handleRoleSwitch('admin')}
+                className="flex-1 py-1.5 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-blue-600 hover:bg-white dark:hover:bg-slate-700">
+                ADMIN
+              </button>
+              <button onClick={() => handleRoleSwitch('editor')}
+                className="flex-1 py-1.5 text-[10px] font-black rounded-md transition-all text-slate-400 dark:text-slate-500 hover:text-violet-600 hover:bg-white dark:hover:bg-slate-700">
+                ÉDITEUR
+              </button>
+              <button onClick={() => handleRoleSwitch('viewer')}
+                className="flex-1 py-1.5 text-[10px] font-black rounded-md transition-all bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 shadow-sm ring-1 ring-slate-200 dark:ring-slate-600">
+                LECTURE
+              </button>
+            </div>
+          )}
         </div>
+
       </header>
 
       {/* Main Content */}
