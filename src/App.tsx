@@ -1030,16 +1030,16 @@ export default function App() {
                 </button>
               </div>
               <div className="flex items-center gap-3 w-full sm:w-auto">
-                <div className="relative flex-grow sm:flex-grow-0">
-                  <input 
-                    type="text" 
+                {!['dashboard', 'stats'].includes(activeTab) && <div className="relative flex-grow sm:flex-grow-0">
+                  <input
+                    type="text"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                     placeholder="Chercher..." 
                     className="pl-9 pr-4 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-md w-full sm:w-48 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all bg-white dark:bg-slate-800 dark:text-white shadow-sm"
                   />
                   <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                </div>
+                </div>}
                 {userRole === 'admin' && activeTab === 'flotte' && (
                   <button 
                     onClick={() => {
