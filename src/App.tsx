@@ -168,6 +168,11 @@ const parseGviz = (text: string): string[][] => {
   }
 };
 
+const getCurrentShift = (): 'Journée' | 'Nuit' => {
+  const h = new Date().getHours();
+  return h >= 6 && h < 18 ? 'Journée' : 'Nuit';
+};
+
 export default function App() {
   const {
     needRefresh: [needRefresh, setNeedRefresh],
@@ -238,10 +243,10 @@ export default function App() {
   });
 
   const [showSessionModal, setShowSessionModal] = useState(false);
-  const [sessionForm, setSessionForm] = useState<{ shift: 'Journée' | 'Nuit'; date: string }>({ shift: 'Journée', date: todayISO });
+  const [sessionForm, setSessionForm] = useState<{ shift: 'Journée' | 'Nuit'; date: string }>({ shift: getCurrentShift(), date: todayISO });
 
   const [showEditorLoginModal, setShowEditorLoginModal] = useState(false);
-  const [editorLoginForm, setEditorLoginForm] = useState<{ id: string; password: string; shift: 'Journée' | 'Nuit'; date: string }>({ id: '', password: '', shift: 'Journée', date: todayISO });
+  const [editorLoginForm, setEditorLoginForm] = useState<{ id: string; password: string; shift: 'Journée' | 'Nuit'; date: string }>({ id: '', password: '', shift: getCurrentShift(), date: todayISO });
   const [editorLoginError, setEditorLoginError] = useState('');
 
   const [showUserManagementModal, setShowUserManagementModal] = useState(false);
@@ -326,7 +331,7 @@ export default function App() {
       setPasswordError(false);
       setPasswordInput('');
     } else {
-      setEditorLoginForm({ id: '', password: '', shift: 'Journée', date: todayISO });
+      setEditorLoginForm({ id: '', password: '', shift: getCurrentShift(), date: todayISO });
       setEditorLoginError('');
       setShowEditorLoginModal(true);
     }
@@ -336,7 +341,7 @@ export default function App() {
     if (passwordInput === 'IRATIB') {
       setShowPasswordModal(false);
       setPasswordInput('');
-      setSessionForm({ shift: 'Journée', date: todayISO });
+      setSessionForm({ shift: getCurrentShift(), date: todayISO });
       setShowSessionModal(true);
     } else {
       setPasswordError(true);
@@ -2300,18 +2305,6 @@ export default function App() {
             </div>
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shift</label>
-                <div className="flex gap-3">
-                  {(['Journée', 'Nuit'] as const).map(s => (
-                    <button key={s} onClick={() => setSessionForm(f => ({ ...f, shift: s }))}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-2 ${sessionForm.shift === s ? (s === 'Journée' ? 'bg-amber-500 text-white border-amber-500 shadow-md' : 'bg-indigo-600 text-white border-indigo-600 shadow-md') : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500'}`}>
-                      {s === 'Journée' ? <Sunrise className="w-3.5 h-3.5" /> : <MoonIcon className="w-3.5 h-3.5" />}
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</label>
                 <input type="date" value={sessionForm.date}
                   onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))}
@@ -2357,18 +2350,6 @@ export default function App() {
                   onKeyDown={e => e.key === 'Enter' && handleEditorLogin()}
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all outline-none"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shift</label>
-                <div className="flex gap-3">
-                  {(['Journée', 'Nuit'] as const).map(s => (
-                    <button key={s} onClick={() => setEditorLoginForm(f => ({ ...f, shift: s }))}
-                      className={`flex-1 py-2 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1.5 ${editorLoginForm.shift === s ? (s === 'Journée' ? 'bg-amber-500 text-white border-amber-500' : 'bg-indigo-600 text-white border-indigo-600') : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500'}`}>
-                      {s === 'Journée' ? <Sunrise className="w-3 h-3" /> : <MoonIcon className="w-3 h-3" />}
-                      {s}
-                    </button>
-                  ))}
-                </div>
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</label>
