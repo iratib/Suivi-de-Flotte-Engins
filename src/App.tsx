@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useRef, FormEvent } from 'react';
 import { motion } from 'motion/react';
+import { useRegisterSW } from 'virtual:pwa-register/react';
 import { 
   BarChart, 
   Bar, 
@@ -168,6 +169,11 @@ const parseGviz = (text: string): string[][] => {
 };
 
 export default function App() {
+  const {
+    needRefresh: [needRefresh, setNeedRefresh],
+    updateServiceWorker,
+  } = useRegisterSW();
+
   const statutOverrides = useRef<Map<number, string>>(new Map());
   const [data, setData] = useState<SheetData[]>([]);
   const [historyData, setHistoryData] = useState<HistoryItem[]>([]);
@@ -787,6 +793,26 @@ export default function App() {
 
   return (
     <div className="bg-slate-50 dark:bg-slate-950 min-h-screen flex flex-col font-sans text-slate-900 dark:text-slate-100 selection:bg-blue-100 dark:selection:bg-blue-900/30 selection:text-blue-900 dark:selection:text-blue-100 transition-colors duration-300">
+      {/* PWA update notification */}
+      {needRefresh && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-blue-600 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-xl shadow-blue-900/30 animate-bounce-in">
+          <RefreshCw size={15} className="shrink-0" />
+          <span>Nouvelle version disponible</span>
+          <button
+            onClick={() => updateServiceWorker(true)}
+            className="ml-1 bg-white text-blue-700 hover:bg-blue-50 font-semibold px-3 py-1 rounded-lg text-xs transition-colors"
+          >
+            Mettre à jour
+          </button>
+          <button
+            onClick={() => setNeedRefresh(false)}
+            className="text-blue-200 hover:text-white ml-1 text-lg leading-none"
+            aria-label="Ignorer"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* Header */}
       <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 shrink-0 shadow-sm z-10 transition-colors duration-300">
         <div className="flex items-center gap-3">
