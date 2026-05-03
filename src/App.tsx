@@ -222,12 +222,21 @@ export default function App() {
   });
   const [allSessions, setAllSessions] = useState<ActiveSession[]>([]);
 
+  // Google Sheets stocke les dates/heures en interne — corrige le format à la lecture
+  const fixSessionDates = (s: any): ActiveSession => ({
+    ...s,
+    date: typeof s.date === 'string' && s.date.includes('T') ? s.date.split('T')[0] : String(s.date ?? ''),
+    loginTime: typeof s.loginTime === 'string' && s.loginTime.includes('T')
+      ? s.loginTime.replace(/.*T(\d{2}):(\d{2}).*/, '$1:$2')
+      : String(s.loginTime ?? '')
+  });
+
   const fetchSessions = async () => {
     try {
       const res = await fetch(`${APPS_SCRIPT_URL}?action=getSessions`);
       if (!res.ok) return;
       const json = await res.json();
-      const sessions: ActiveSession[] = json.sessions || [];
+      const sessions: ActiveSession[] = (json.sessions || []).map(fixSessionDates);
       setAllSessions(sessions);
       // Auto-déconnexion si ma session a été supprimée par l'admin
       if (mySessionIdRef.current && !sessions.find(s => s.sessionId === mySessionIdRef.current)) {
