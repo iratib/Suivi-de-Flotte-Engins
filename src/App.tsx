@@ -55,6 +55,7 @@ import {
 const SHEET_ID = '1qMgsmIERDsUTfiYhyaDr3YPuXN7eJV0tlwHK1WhTIYI';
 const URL_FLOTTE   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Feuil1`;
 const URL_HISTORY  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique`;
+const URL_USERS    = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Utilisateurs`;
 
 // Apps Script URL pour l'écriture — remplace par ton URL après déploiement Apps Script
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz_q2pVSMWyqu02JsbTVvlO8ceLP4XFMN-P5hVlcxeu7V5st9efTHpDMumw0lsiRMO3/exec';
@@ -152,6 +153,11 @@ const fmtNow = (): string => {
   return `${p(n.getDate())}/${p(n.getMonth() + 1)}/${n.getFullYear()} ${p(n.getHours())}:${p(n.getMinutes())}`;
 };
 
+const sha256 = async (text: string): Promise<string> => {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
 // Parse la réponse gviz/tq de Google Sheets
 const parseGviz = (text: string): string[][] => {
   try {
@@ -209,38 +215,50 @@ export default function App() {
   const mySessionIdRef = useRef<string | null>(sessionStorage.getItem('mySessionId'));
   const bcRef = useRef<BroadcastChannel | null>(null);
 
-  const getSessions = (): ActiveSession[] => {
-    try { return JSON.parse(localStorage.getItem('activeSessions') || '[]'); } catch { return []; }
-  };
-
-  // Initialisé directement depuis localStorage pour éviter le flash vide
   const [mySession, setMySession] = useState<ActiveSession | null>(() => {
     const sid = sessionStorage.getItem('mySessionId');
     if (!sid) return null;
-    return getSessions().find(s => s.sessionId === sid) ?? null;
+    try { return JSON.parse(sessionStorage.getItem('mySession') || 'null'); } catch { return null; }
   });
-  const [allSessions, setAllSessions] = useState<ActiveSession[]>(() => getSessions());
+  const [allSessions, setAllSessions] = useState<ActiveSession[]>([]);
 
-  const refreshSessions = () => setAllSessions(getSessions());
-
-  const persistSessions = (sessions: ActiveSession[]) => {
-    localStorage.setItem('activeSessions', JSON.stringify(sessions));
-    setAllSessions([...sessions]);
-    // Notifier tous les autres onglets via BroadcastChannel (fiable) ET storage event (fallback)
-    bcRef.current?.postMessage({ type: 'sessions_updated' });
+  const fetchSessions = async () => {
+    try {
+      const res = await fetch(`${APPS_SCRIPT_URL}?action=getSessions`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const sessions: ActiveSession[] = json.sessions || [];
+      setAllSessions(sessions);
+      // Auto-déconnexion si ma session a été supprimée par l'admin
+      if (mySessionIdRef.current && !sessions.find(s => s.sessionId === mySessionIdRef.current)) {
+        sessionStorage.removeItem('mySessionId');
+        sessionStorage.removeItem('mySession');
+        mySessionIdRef.current = null;
+        setMySession(null);
+        setUserRole('viewer');
+        setEditingRow(null);
+      }
+    } catch { /* erreur réseau : garder l'état actuel */ }
   };
+
+  const refreshSessions = () => { fetchSessions(); };
+
   const addSession = (session: ActiveSession) => {
-    persistSessions([...getSessions().filter(s => s.sessionId !== session.sessionId), session]);
+    setAllSessions(prev => [...prev.filter(s => s.sessionId !== session.sessionId), session]);
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'addSession', session })
+    }).catch(() => {});
   };
   const removeSession = (sessionId: string) => {
-    persistSessions(getSessions().filter(s => s.sessionId !== sessionId));
+    setAllSessions(prev => prev.filter(s => s.sessionId !== sessionId));
+    fetch(`${APPS_SCRIPT_URL}?action=removeSession&sessionId=${encodeURIComponent(sessionId)}`, { method: 'GET', mode: 'no-cors' }).catch(() => {});
   };
   const generateSessionId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
   // ── Fin session ──────────────────────────────────────────────────────────
 
-  const [editorUsers, setEditorUsers] = useState<Array<{ id: string; password: string }>>(() => {
-    try { return JSON.parse(localStorage.getItem('editorUsers') || '[]'); } catch { return []; }
-  });
+  const [editorUsers, setEditorUsers] = useState<Array<{ id: string; password: string }>>([]);
 
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionForm, setSessionForm] = useState<{ shift: 'Journée' | 'Nuit'; date: string }>({ shift: getCurrentShift(), date: todayISO });
@@ -368,8 +386,9 @@ export default function App() {
     setShowSessionModal(false);
   };
 
-  const handleEditorLogin = () => {
-    const user = editorUsers.find(u => u.id === editorLoginForm.id && u.password === editorLoginForm.password);
+  const handleEditorLogin = async () => {
+    const hash = await sha256(editorLoginForm.password);
+    const user = editorUsers.find(u => u.id === editorLoginForm.id && u.password === hash);
     if (user) {
       const sessionId = generateSessionId();
       const session: ActiveSession = {
@@ -409,22 +428,26 @@ export default function App() {
     removeSession(sessionId);
   };
 
-  const handleAddEditor = () => {
+  const handleAddEditor = async () => {
     if (!newEditorForm.id.trim() || !newEditorForm.password.trim()) { setNewEditorError('Tous les champs sont obligatoires'); return; }
     if (newEditorForm.password !== newEditorForm.confirmPassword) { setNewEditorError('Les mots de passe ne correspondent pas'); return; }
     if (editorUsers.find(u => u.id.toLowerCase() === newEditorForm.id.toLowerCase())) { setNewEditorError('Cet identifiant existe déjà'); return; }
-    const updated = [...editorUsers, { id: newEditorForm.id, password: newEditorForm.password }];
-    setEditorUsers(updated);
-    localStorage.setItem('editorUsers', JSON.stringify(updated));
+    const hash = await sha256(newEditorForm.password);
+    const newEditor = { id: newEditorForm.id.trim(), password: hash };
+    setEditorUsers(prev => [...prev, newEditor]);
     setNewEditorForm({ id: '', password: '', confirmPassword: '' });
     setNewEditorError('');
+    try {
+      await fetch(`${APPS_SCRIPT_URL}?action=addEditor&id=${encodeURIComponent(newEditor.id)}&passwordHash=${hash}`);
+    } catch {
+      setNewEditorError('Éditeur ajouté localement — vérifiez votre connexion pour la sync');
+    }
   };
 
-  const handleRemoveEditor = (id: string) => {
+  const handleRemoveEditor = async (id: string) => {
     if (!confirm(`Supprimer l'éditeur "${id}" ?`)) return;
-    const updated = editorUsers.filter(u => u.id !== id);
-    setEditorUsers(updated);
-    localStorage.setItem('editorUsers', JSON.stringify(updated));
+    setEditorUsers(prev => prev.filter(u => u.id !== id));
+    fetch(`${APPS_SCRIPT_URL}?action=removeEditor&id=${encodeURIComponent(id)}`).catch(() => {});
   };
 
   useEffect(() => {
@@ -446,32 +469,24 @@ export default function App() {
     if (raw) {
       try {
         const session: ActiveSession = JSON.parse(raw);
-        // Re-enregistrer dans activeSessions si elle a disparu (ex: autre onglet a nettoyé)
-        const sessions = getSessions();
-        if (!sessions.find(s => s.sessionId === session.sessionId)) {
-          persistSessions([...sessions, session]);
-        }
         mySessionIdRef.current = session.sessionId;
         setMySession(session);
         setUserRole('admin');
+        // Re-enregistrer dans la sheet (upsert idempotent)
+        addSession(session);
       } catch { sessionStorage.removeItem('mySession'); sessionStorage.removeItem('mySessionId'); }
     }
-    // BroadcastChannel : canal dédié inter-onglets, plus fiable que storage events
+    // BroadcastChannel : canal dédié inter-onglets (même appareil)
     if ('BroadcastChannel' in window) {
       bcRef.current = new BroadcastChannel('fleet_sessions');
-      bcRef.current.onmessage = () => refreshSessions();
+      bcRef.current.onmessage = () => fetchSessions();
     }
-    // storage event comme fallback (certains navigateurs bloquent BroadcastChannel)
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === 'activeSessions') refreshSessions();
-    };
-    window.addEventListener('storage', onStorage);
-    // Rafraîchissement périodique toutes les 5 s (filet de sécurité)
-    const interval = setInterval(refreshSessions, 5000);
+    // Polling toutes les 8 s pour synchroniser avec les autres appareils
+    fetchSessions();
+    const interval = setInterval(fetchSessions, 8000);
 
     return () => {
       bcRef.current?.close();
-      window.removeEventListener('storage', onStorage);
       clearInterval(interval);
     };
   }, []);
@@ -562,9 +577,19 @@ export default function App() {
     }
   };
 
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch(`${APPS_SCRIPT_URL}?action=getUsers`);
+      if (!res.ok) return;
+      const json = await res.json();
+      setEditorUsers(json.users || []);
+    } catch { /* garder l'état actuel si erreur réseau */ }
+  };
+
   useEffect(() => {
     fetchData();
     fetchHistory();
+    fetchUsers();
   }, []);
 
   // ============================================================
