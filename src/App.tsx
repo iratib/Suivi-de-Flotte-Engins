@@ -284,6 +284,13 @@ export default function App() {
   const [retireTarget, setRetireTarget] = useState<SheetData | null>(null);
   const [retireObs, setRetireObs] = useState('');
   const [permDeleteTarget, setPermDeleteTarget] = useState<SheetData | null>(null);
+  const [confirmKickTarget, setConfirmKickTarget] = useState<{ sessionId: string; name: string } | null>(null);
+  const [confirmRemoveEditorTarget, setConfirmRemoveEditorTarget] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'warning' | 'info' } | null>(null);
+  const showToast = (message: string, type: 'error' | 'warning' | 'info' = 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const captureTypeTable = (rows: { name: string; total: number; ok: number; hs: number; taux: number }[]) => {
     if (rows.length === 0) return;
@@ -432,9 +439,8 @@ export default function App() {
     setEditingRow(null);
   };
 
-  const handleKickSession = (sessionId: string) => {
-    if (!confirm('Forcer la déconnexion de cette session ?')) return;
-    removeSession(sessionId);
+  const handleKickSession = (sessionId: string, name: string) => {
+    setConfirmKickTarget({ sessionId, name });
   };
 
   const handleAddEditor = async () => {
@@ -453,10 +459,8 @@ export default function App() {
     }
   };
 
-  const handleRemoveEditor = async (id: string) => {
-    if (!confirm(`Supprimer l'éditeur "${id}" ?`)) return;
-    setEditorUsers(prev => prev.filter(u => u.id !== id));
-    fetch(`${APPS_SCRIPT_URL}?action=removeEditor&id=${encodeURIComponent(id)}`).catch(() => {});
+  const handleRemoveEditor = (id: string) => {
+    setConfirmRemoveEditorTarget(id);
   };
 
   useEffect(() => {
@@ -615,7 +619,7 @@ export default function App() {
       d.rowIndex !== editingRow
     );
     if (duplicate) {
-      alert(`Le numéro d'engin "${form.numEngin}" est déjà utilisé par "${duplicate.designation}". Chaque numéro doit être unique.`);
+      showToast(`N° "${form.numEngin}" déjà utilisé par "${duplicate.designation}". Chaque numéro doit être unique.`, 'warning');
       return;
     }
 
@@ -623,7 +627,7 @@ export default function App() {
     if (isEdit) {
       const original = data.find(d => d.rowIndex === editingRow);
       if (original?.etat === 'OK' && form.etat === 'HS' && !form.observation.trim()) {
-        alert('L\'observation est obligatoire pour justifier le passage en Hors Service.');
+        showToast('L\'observation est obligatoire pour justifier le passage en Hors Service.', 'warning');
         return;
       }
     }
@@ -666,7 +670,7 @@ export default function App() {
       }, 1000);
 
     } catch (err: any) {
-      alert(`Erreur: ${err.message}`);
+      showToast(`Erreur: ${err.message}`, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -696,7 +700,7 @@ export default function App() {
 
   const confirmRetire = () => {
     if (!retireTarget) return;
-    if (!retireObs.trim()) { alert('L\'observation est obligatoire pour justifier le retrait de l\'engin.'); return; }
+    if (!retireObs.trim()) { showToast('L\'observation est obligatoire pour justifier le retrait de l\'engin.', 'warning'); return; }
     const editorId = mySession?.name || (userRole === 'admin' ? 'Admin' : 'Viewer');
     statutOverrides.current.set(retireTarget.rowIndex!, 'Retiré');
     setData(prev => prev.map(d => d.rowIndex === retireTarget.rowIndex ? { ...d, statut: 'Retiré', observation: retireObs.trim() } : d));
@@ -1574,7 +1578,7 @@ export default function App() {
                                   <span className="text-[9px] font-mono text-slate-400 flex items-center gap-0.5"><Clock className="w-2 h-2" />{session.loginTime}</span>
                                 </div>
                                 {!isMe && (
-                                  <button onClick={() => handleKickSession(session.sessionId)}
+                                  <button onClick={() => handleKickSession(session.sessionId, session.name)}
                                     className="w-full py-1.5 bg-rose-50 dark:bg-rose-900/20 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1">
                                     <LogOut className="w-2.5 h-2.5" /> Déconnecter
                                   </button>
@@ -2290,6 +2294,91 @@ export default function App() {
               <button onClick={confirmPermanentDelete}
                 className="flex-1 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white font-black text-sm shadow-lg shadow-rose-700/20 transition-all">
                 Supprimer définitivement
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4">
+          <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
+            className={`flex items-start gap-3 rounded-2xl px-5 py-4 shadow-2xl border ${
+              toast.type === 'error'   ? 'bg-rose-600 border-rose-500 text-white' :
+              toast.type === 'warning' ? 'bg-amber-50 dark:bg-amber-900/40 border-amber-200 dark:border-amber-700 text-amber-800 dark:text-amber-200' :
+                                         'bg-blue-50 dark:bg-blue-900/40 border-blue-200 dark:border-blue-700 text-blue-800 dark:text-blue-200'
+            }`}>
+            <div className={`w-5 h-5 shrink-0 mt-0.5 rounded-full flex items-center justify-center text-[10px] font-black ${
+              toast.type === 'error' ? 'bg-white/20' : toast.type === 'warning' ? 'bg-amber-200 dark:bg-amber-700' : 'bg-blue-200 dark:bg-blue-700'
+            }`}>
+              {toast.type === 'error' ? '✕' : '!'}
+            </div>
+            <p className="text-sm font-semibold leading-snug">{toast.message}</p>
+            <button onClick={() => setToast(null)} className="ml-auto shrink-0 opacity-60 hover:opacity-100 transition-opacity text-lg leading-none">×</button>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal : Confirmer déconnexion de session */}
+      {confirmKickTarget && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl p-7 border border-rose-200 dark:border-rose-900/50 shadow-2xl w-full max-w-md space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 shrink-0 rounded-full bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
+                <LogOut className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+              </div>
+              <div>
+                <h3 className="font-black text-rose-700 dark:text-rose-400 text-base uppercase tracking-wide">Forcer la déconnexion</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  La session de <span className="font-bold text-slate-700 dark:text-slate-300">{confirmKickTarget.name}</span> sera <span className="font-black text-rose-600">immédiatement déconnectée</span>. L'utilisateur devra se reconnecter.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setConfirmKickTarget(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all">
+                Annuler
+              </button>
+              <button onClick={() => { removeSession(confirmKickTarget.sessionId); setConfirmKickTarget(null); }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-sm shadow-lg shadow-rose-600/20 transition-all">
+                Déconnecter
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal : Confirmer suppression éditeur */}
+      {confirmRemoveEditorTarget && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl p-7 border border-rose-200 dark:border-rose-900/50 shadow-2xl w-full max-w-md space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 shrink-0 rounded-full bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
+                <Trash2 className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+              </div>
+              <div>
+                <h3 className="font-black text-rose-700 dark:text-rose-400 text-base uppercase tracking-wide">Supprimer l'éditeur</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  L'éditeur <span className="font-bold text-slate-700 dark:text-slate-300">"{confirmRemoveEditorTarget}"</span> sera <span className="font-black text-rose-600">supprimé définitivement</span>. Il ne pourra plus se connecter.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setConfirmRemoveEditorTarget(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all">
+                Annuler
+              </button>
+              <button onClick={() => {
+                const id = confirmRemoveEditorTarget;
+                setEditorUsers(prev => prev.filter(u => u.id !== id));
+                fetch(`${APPS_SCRIPT_URL}?action=removeEditor&id=${encodeURIComponent(id)}`).catch(() => {});
+                setConfirmRemoveEditorTarget(null);
+              }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white font-black text-sm shadow-lg shadow-rose-700/20 transition-all">
+                Supprimer
               </button>
             </div>
           </motion.div>
