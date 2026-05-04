@@ -330,6 +330,7 @@ tr:last-child td{border-bottom:none}
 .footer{text-align:center;padding:16px;font-size:9px;color:#94a3b8;border-top:1px solid #e2e8f0;margin-top:4px;line-height:1.8}
 .print-btn{position:fixed;bottom:20px;right:20px;background:#1e40af;color:#fff;border:none;padding:11px 22px;border-radius:11px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(30,64,175,.4);z-index:999;display:flex;align-items:center;gap:7px}
 .print-btn:hover{background:#1d4ed8}
+*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
 @media print{body{background:#fff}.page{padding:16px}.header{border-radius:0;margin-bottom:16px}.print-btn{display:none}@page{margin:8mm}}
 </style></head>
 <body>
