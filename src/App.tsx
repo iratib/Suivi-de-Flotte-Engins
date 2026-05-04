@@ -56,9 +56,10 @@ const SHEET_ID = '1qMgsmIERDsUTfiYhyaDr3YPuXN7eJV0tlwHK1WhTIYI';
 const URL_FLOTTE   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Feuil1`;
 const URL_HISTORY  = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Historique`;
 const URL_USERS    = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Utilisateurs`;
+const URL_EFFECTIF = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Effectif`;
 
 // Apps Script URL pour l'écriture — remplace par ton URL après déploiement Apps Script
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz_q2pVSMWyqu02JsbTVvlO8ceLP4XFMN-P5hVlcxeu7V5st9efTHpDMumw0lsiRMO3/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyNYx9XVCC-l0L5U_pImscqDcH6leq-K0Aqp8Wr_Q3wkDrWY_72eUAurjJLu5or5FY2/exec';
 // ============================================================
 
 interface SheetData {
@@ -81,6 +82,30 @@ interface HistoryItem {
   observation: string;
   action: string;
   editeur: string;
+}
+
+interface EffectifVacation {
+  id: string;
+  date: string;
+  shift: 'Journée' | 'Nuit';
+  // Direction PISTE
+  doPiste: string;
+  leaderZoneBCE: string;
+  leaderZoneDJF: string;
+  regulateurPlanche: string;
+  leaderPushback: string;
+  leaderCabine: string;
+  regulateurBagagistes: string;
+  regulateurBus: string;
+  // Direction ZONES
+  doZones: string;
+  leaderT1: string;
+  leaderT2: string;
+  leaderCorrespondance: string;
+  leaderLivraison: string;
+  locked: boolean;
+  savedAt: string;
+  savedBy: string;
 }
 
 // Formate une valeur date gviz (ex: "Date(2026,4,1,1,7,40)") → "01/05/2026 01:07"
@@ -179,6 +204,36 @@ const getCurrentShift = (): 'Journée' | 'Nuit' => {
   return h >= 6 && h < 18 ? 'Journée' : 'Nuit';
 };
 
+const makeEmptyEffectif = (date: string, shift: 'Journée' | 'Nuit', name: string): EffectifVacation => ({
+  id: `${date}_${shift}`,
+  date, shift,
+  doPiste: name, leaderZoneBCE: '', leaderZoneDJF: '', regulateurPlanche: '',
+  leaderPushback: '', leaderCabine: '', regulateurBagagistes: '', regulateurBus: '',
+  doZones: '', leaderT1: '', leaderT2: '', leaderCorrespondance: '', leaderLivraison: '',
+  locked: false, savedAt: '', savedBy: ''
+});
+
+function EffectifField({ label, sublabel, value, onChange, locked, readOnly, accent }: {
+  label: string; sublabel?: string; value: string;
+  onChange: (v: string) => void; locked: boolean; readOnly?: boolean; accent?: 'violet';
+}) {
+  const disabled = locked || readOnly;
+  return (
+    <div className={`rounded-xl p-4 border ${accent === 'violet' ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800/50' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
+      <label className={`block text-[9px] font-black uppercase tracking-widest mb-2 ${accent === 'violet' ? 'text-violet-500' : 'text-slate-500 dark:text-slate-400'}`}>
+        {label}{sublabel && <span className="ml-1 normal-case font-medium text-slate-400">({sublabel})</span>}
+      </label>
+      <input
+        type="text" value={value}
+        onChange={e => onChange(e.target.value)}
+        disabled={disabled}
+        placeholder={disabled ? '—' : 'Entrer le nom…'}
+        className={`w-full px-3 py-2 rounded-lg text-xs font-medium outline-none transition-all border ${disabled ? 'bg-slate-50 dark:bg-slate-900/50 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-800 cursor-not-allowed' : 'bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400'}`}
+      />
+    </div>
+  );
+}
+
 export default function App() {
   const {
     needRefresh: [needRefresh, setNeedRefresh],
@@ -188,7 +243,7 @@ export default function App() {
   const statutOverrides = useRef<Map<number, string>>(new Map());
   const [data, setData] = useState<SheetData[]>([]);
   const [historyData, setHistoryData] = useState<HistoryItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'flotte' | 'historique' | 'dashboard' | 'stats' | 'outofparc'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'flotte' | 'historique' | 'dashboard' | 'stats' | 'outofparc' | 'effectif'>('dashboard');
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -291,6 +346,13 @@ export default function App() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  const [effectifList, setEffectifList] = useState<EffectifVacation[]>([]);
+  const [effectifForm, setEffectifForm] = useState<EffectifVacation>(() =>
+    makeEmptyEffectif(new Date().toISOString().split('T')[0], getCurrentShift(), '')
+  );
+  const [effectifHistoryFilter, setEffectifHistoryFilter] = useState<{ date: string; shift: 'Toutes' | 'Journée' | 'Nuit' }>({ date: '', shift: 'Toutes' });
+  const [savingEffectif, setSavingEffectif] = useState(false);
 
   const captureTypeTable = (rows: { name: string; total: number; ok: number; hs: number; taux: number }[]) => {
     if (rows.length === 0) return;
@@ -599,6 +661,121 @@ export default function App() {
     } catch { /* garder l'état actuel si erreur réseau */ }
   };
 
+  // ============================================================
+  // EFFECTIF DE VACATION
+  // ============================================================
+  const fetchEffectif = async (sessionArg?: { date: string; shift: 'Journée' | 'Nuit'; name: string }) => {
+    try {
+      const res = await fetch(`${APPS_SCRIPT_URL}?action=getEffectif`);
+      let records: EffectifVacation[] = [];
+      if (res.ok) {
+        const json = await res.json();
+        records = json.records || [];
+      } else {
+        // Fallback: essai via gviz (lecture différée 2-5 min)
+        const gvizRes = await fetch(URL_EFFECTIF);
+        if (gvizRes.ok) {
+          const text = await gvizRes.text();
+          const rows = parseGviz(text);
+          records = rows.map(r => ({
+            id: r[0], date: r[1], shift: r[2] as 'Journée' | 'Nuit',
+            doPiste: r[3], leaderZoneBCE: r[4], leaderZoneDJF: r[5],
+            regulateurPlanche: r[6], leaderPushback: r[7], leaderCabine: r[8],
+            regulateurBagagistes: r[9], regulateurBus: r[10],
+            doZones: r[11], leaderT1: r[12], leaderT2: r[13], leaderCorrespondance: r[14],
+            leaderLivraison: r[15], locked: r[16] === 'TRUE' || r[16] === 'true',
+            savedAt: r[17], savedBy: r[18]
+          })).filter(r => r.id);
+        }
+      }
+      setEffectifList(records);
+      const sess = sessionArg || (mySession ? { date: mySession.date, shift: mySession.shift, name: mySession.name } : null);
+      if (sess) {
+        const existing = records.find(r => r.date === sess.date && r.shift === sess.shift);
+        setEffectifForm(existing || makeEmptyEffectif(sess.date, sess.shift, sess.name));
+      }
+    } catch {
+      const sess = mySession;
+      if (sess) setEffectifForm(f => f.id === '' ? makeEmptyEffectif(sess.date, sess.shift, sess.name) : f);
+    }
+  };
+
+  const handleSaveEffectif = async () => {
+    setSavingEffectif(true);
+    const record: EffectifVacation = {
+      ...effectifForm,
+      id: `${effectifForm.date}_${effectifForm.shift}`,
+      savedAt: fmtNow(),
+      savedBy: mySession?.name || 'Inconnu'
+    };
+    setEffectifList(prev => {
+      const idx = prev.findIndex(r => r.id === record.id);
+      return idx >= 0 ? prev.map((r, i) => i === idx ? record : r) : [...prev, record];
+    });
+    setEffectifForm(record);
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'saveEffectif', record })
+    }).catch(() => {});
+    setSavingEffectif(false);
+    showToast('Effectif enregistré avec succès', 'info');
+  };
+
+  const handleToggleEffectifLock = (locked: boolean) => {
+    const id = `${effectifForm.date}_${effectifForm.shift}`;
+    const updated = { ...effectifForm, locked, id };
+    setEffectifList(prev => {
+      const idx = prev.findIndex(r => r.id === id);
+      return idx >= 0 ? prev.map((r, i) => i === idx ? updated : r) : [...prev, updated];
+    });
+    setEffectifForm(updated);
+    fetch(`${APPS_SCRIPT_URL}?action=lockEffectif&id=${encodeURIComponent(id)}&locked=${locked}`, { mode: 'no-cors' }).catch(() => {});
+    showToast(locked ? 'Vacation verrouillée' : 'Vacation déverrouillée', 'info');
+  };
+
+  const handlePrintEffectif = (record: EffectifVacation) => {
+    const w = window.open('', '_blank', 'width=820,height=640');
+    if (!w) return;
+    const shiftBadge = record.shift === 'Journée'
+      ? '<span style="background:#fef3c7;color:#92400e;padding:3px 12px;border-radius:100px;font-size:11px;font-weight:700;">☀️ Journée</span>'
+      : '<span style="background:#e0e7ff;color:#3730a3;padding:3px 12px;border-radius:100px;font-size:11px;font-weight:700;">🌙 Nuit</span>';
+    const displayDate = record.date ? record.date.split('-').reverse().join('/') : '';
+    const fields: [string, string, string][] = [
+      ['DIRECTION PISTE', 'DO Piste', record.doPiste],
+      ['DIRECTION PISTE', 'Leader Zone B, C, E', record.leaderZoneBCE],
+      ['DIRECTION PISTE', 'Leader Zone D, J, F', record.leaderZoneDJF],
+      ['DIRECTION PISTE', 'Régulateur Planche', record.regulateurPlanche],
+      ['DIRECTION PISTE', 'Leader Pushback', record.leaderPushback],
+      ['DIRECTION PISTE', 'Leader Cabine', record.leaderCabine],
+      ['DIRECTION PISTE', 'Régulateur Bagagistes', record.regulateurBagagistes],
+      ['DIRECTION PISTE', 'Régulateur Bus', record.regulateurBus],
+      ['DIRECTION ZONES', 'DO Zones', record.doZones],
+      ['DIRECTION ZONES', 'Leader T1', record.leaderT1],
+      ['DIRECTION ZONES', 'Leader T2', record.leaderT2],
+      ['DIRECTION ZONES', 'Leader Correspondance', record.leaderCorrespondance],
+      ['DIRECTION ZONES', 'Leader Livraison', record.leaderLivraison],
+    ];
+    const sections = ['DIRECTION PISTE', 'DIRECTION ZONES'] as const;
+    const sectionColors: Record<string, string> = { 'DIRECTION PISTE': '#3b82f6', 'DIRECTION ZONES': '#10b981' };
+    w.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
+    <title>Effectif de Vacation — ${displayDate} ${record.shift}</title>
+    <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,-apple-system,sans-serif;padding:40px;color:#1e293b;background:#fff}.header{border-bottom:3px solid #7c3aed;padding-bottom:16px;margin-bottom:24px}.title{font-size:22px;font-weight:900;color:#1e293b;letter-spacing:-0.5px}.subtitle{font-size:12px;color:#64748b;margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.meta{font-size:10px;color:#94a3b8;margin-top:6px;font-family:monospace}.section-title{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.15em;padding:10px 16px;margin-top:16px}table{width:100%;border-collapse:collapse}tr:nth-child(even){background:#f8fafc}td{padding:10px 16px;font-size:12px;border-bottom:1px solid #f1f5f9}td:first-child{font-weight:700;color:#475569;width:220px}td:last-child{font-weight:600;color:#1e293b}.empty{color:#cbd5e1;font-style:italic;font-weight:400}.footer{margin-top:32px;border-top:1px solid #f1f5f9;padding-top:12px;font-size:9px;color:#94a3b8;display:flex;justify-content:space-between}@media print{body{padding:20px}@page{margin:12mm}}</style>
+    </head><body>
+    <div class="header"><div class="title">Effectif de Vacation</div>
+    <div class="subtitle"><span>Date : <strong>${displayDate}</strong></span>${shiftBadge}</div>
+    ${record.savedAt ? `<div class="meta">Enregistré le ${record.savedAt} par ${record.savedBy}</div>` : ''}</div>
+    ${sections.map(sec => {
+      const secFields = fields.filter(([s]) => s === sec);
+      return `<div class="section-title" style="color:${sectionColors[sec]};border-left:3px solid ${sectionColors[sec]};padding-left:12px">${sec}</div><table>${secFields.map(([, fn, val]) => `<tr><td>${fn}</td><td>${val ? val : '<span class="empty">—</span>'}</td></tr>`).join('')}</table>`;
+    }).join('')}
+    <div class="footer"><span>Suivi de Flotte Engins</span><span>Imprimé le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span></div>
+    </body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 500);
+  };
+
   useEffect(() => {
     fetchData();
     fetchHistory();
@@ -759,6 +936,12 @@ export default function App() {
     item.designation.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.numEngin.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const currentEffectif = useMemo(() => {
+    const date = mySession?.date || todayISO;
+    const shift = mySession?.shift || getCurrentShift();
+    return effectifList.find(r => r.date === date && r.shift === shift) || null;
+  }, [effectifList, mySession, todayISO]);
 
   const stats = useMemo(() => {
     const active = data.filter(i => i.statut !== 'Retiré');
@@ -1071,9 +1254,16 @@ export default function App() {
                     <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none">{retiredData.length}</span>
                   )}
                 </button>
+                <button
+                  onClick={() => { setActiveTab('effectif'); fetchEffectif(); }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all shrink-0 ${activeTab === 'effectif' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                >
+                  <Users className="w-4 h-4" />
+                  <h2 className="font-bold text-sm">Effectif</h2>
+                </button>
               </div>
               <div className="flex items-center gap-3 w-full sm:w-auto">
-                {!['dashboard', 'stats'].includes(activeTab) && <div className="relative flex-grow sm:flex-grow-0">
+                {!['dashboard', 'stats', 'effectif'].includes(activeTab) && <div className="relative flex-grow sm:flex-grow-0">
                   <input
                     type="text"
                     value={searchTerm}
@@ -1711,6 +1901,102 @@ export default function App() {
                       </table>
                     </div>
                   </motion.div>
+
+                  {/* ═══ EFFECTIF DE VACATION ═══ */}
+                  <div>
+                    <div className="flex items-center justify-between mb-5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-gradient-to-br from-violet-500 to-violet-700 rounded-xl flex items-center justify-center shadow-md shadow-violet-500/25">
+                          <Users className="w-4 h-4 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wide">Effectif de Vacation</h3>
+                          <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1.5">
+                            {(mySession?.shift || getCurrentShift()) === 'Journée'
+                              ? <><Sun className="w-3 h-3 text-amber-400" /> Journée</>
+                              : <><MoonIcon className="w-3 h-3 text-indigo-400" /> Nuit</>
+                            }
+                            {' · '}{formatDisplayDate(mySession?.date || todayISO)}
+                          </p>
+                        </div>
+                      </div>
+                      {!currentEffectif && (
+                        <button onClick={() => { setActiveTab('effectif'); fetchEffectif(); }}
+                          className="text-[10px] font-black text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-1">
+                          <PlusCircle className="w-3 h-3" /> Saisir l'effectif
+                        </button>
+                      )}
+                      {currentEffectif && (
+                        <button onClick={() => handlePrintEffectif(currentEffectif)}
+                          className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-violet-600 transition-all" title="Imprimer">
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {!currentEffectif ? (
+                      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-10 text-center">
+                        <Users className="w-10 h-10 text-slate-200 dark:text-slate-700 mx-auto mb-3" />
+                        <p className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Effectif non saisi</p>
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">L'éditeur n'a pas encore renseigné l'effectif de cette vacation.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Direction PISTE */}
+                        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                          <div className="px-5 py-4 bg-blue-600 flex items-center gap-3">
+                            <Sunrise className="w-4 h-4 text-white/80" />
+                            <span className="text-xs font-black text-white uppercase tracking-widest">Direction Piste</span>
+                            <span className="ml-auto text-[10px] font-bold text-white/60">{currentEffectif.doPiste}</span>
+                          </div>
+                          <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                            {([
+                              { key: 'doPiste', label: 'DO Piste', accent: true },
+                              { key: 'leaderZoneBCE', label: 'Leader Zone B, C, E' },
+                              { key: 'leaderZoneDJF', label: 'Leader Zone D, J, F' },
+                              { key: 'regulateurPlanche', label: 'Régulateur Planche' },
+                              { key: 'leaderPushback', label: 'Leader Pushback' },
+                              { key: 'leaderCabine', label: 'Leader Cabine' },
+                              { key: 'regulateurBagagistes', label: 'Régulateur Bagagistes' },
+                              { key: 'regulateurBus', label: 'Régulateur Bus' },
+                            ] as { key: keyof EffectifVacation; label: string; accent?: boolean }[]).map(({ key, label, accent }) => (
+                              <div key={key} className={`flex items-center justify-between px-5 py-3 ${accent ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                                <span className={`text-[10px] font-black uppercase tracking-wider ${accent ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}>{label}</span>
+                                <span className={`text-xs font-bold ${currentEffectif[key] ? 'text-slate-800 dark:text-slate-100' : 'text-slate-300 dark:text-slate-600 italic'}`}>
+                                  {String(currentEffectif[key] || '—')}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        {/* Direction ZONES */}
+                        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                          <div className="px-5 py-4 bg-emerald-600 flex items-center gap-3">
+                            <Database className="w-4 h-4 text-white/80" />
+                            <span className="text-xs font-black text-white uppercase tracking-widest">Direction Zones</span>
+                            <span className="ml-auto text-[10px] font-bold text-white/60">{currentEffectif.doZones}</span>
+                          </div>
+                          <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                            {([
+                              { key: 'doZones', label: 'DO Zones', accent: true },
+                              { key: 'leaderT1', label: 'Leader T1' },
+                              { key: 'leaderT2', label: 'Leader T2' },
+                              { key: 'leaderCorrespondance', label: 'Leader Correspondance' },
+                              { key: 'leaderLivraison', label: 'Leader Livraison' },
+                            ] as { key: keyof EffectifVacation; label: string; accent?: boolean }[]).map(({ key, label, accent }) => (
+                              <div key={key} className={`flex items-center justify-between px-5 py-3 ${accent ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}>
+                                <span className={`text-[10px] font-black uppercase tracking-wider ${accent ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>{label}</span>
+                                <span className={`text-xs font-bold ${currentEffectif[key] ? 'text-slate-800 dark:text-slate-100' : 'text-slate-300 dark:text-slate-600 italic'}`}>
+                                  {String(currentEffectif[key] || '—')}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               ) : activeTab === 'stats' ? (
                 <div className="p-8 overflow-y-auto h-full space-y-8 bg-slate-50 dark:bg-slate-900/30">
@@ -2006,6 +2292,213 @@ export default function App() {
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+                </div>
+              ) : activeTab === 'effectif' ? (
+                <div className="flex flex-col h-full overflow-auto">
+                  {/* ═══ EFFECTIF HEADER ═══ */}
+                  <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-br from-violet-50 via-white to-white dark:from-violet-950/20 dark:via-slate-900 dark:to-slate-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-violet-700 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/30 shrink-0">
+                      <Users className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-800 dark:text-white tracking-tight">Effectif de Vacation</h3>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        {mySession ? (
+                          <>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black ${mySession.shift === 'Journée' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'}`}>
+                              {mySession.shift === 'Journée' ? <Sun className="w-2.5 h-2.5" /> : <MoonIcon className="w-2.5 h-2.5" />}
+                              {mySession.shift}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">·</span>
+                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">{formatDisplayDate(mySession.date)}</span>
+                            <span className="text-[10px] font-bold text-slate-400">·</span>
+                            <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400">{mySession.name}</span>
+                          </>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400">Connectez-vous pour saisir l'effectif</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {mySession && (() => {
+                      const filled = [effectifForm.doPiste, effectifForm.leaderZoneBCE, effectifForm.leaderZoneDJF, effectifForm.regulateurPlanche, effectifForm.leaderPushback, effectifForm.leaderCabine, effectifForm.regulateurBagagistes, effectifForm.regulateurBus, effectifForm.doZones, effectifForm.leaderT1, effectifForm.leaderT2, effectifForm.leaderCorrespondance, effectifForm.leaderLivraison].filter(Boolean).length;
+                      return (
+                        <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                          <div className="flex gap-0.5">
+                            {Array.from({ length: 13 }).map((_, i) => (
+                              <div key={i} className={`w-1.5 h-4 rounded-full transition-all ${i < filled ? 'bg-violet-500' : 'bg-slate-200 dark:bg-slate-700'}`} />
+                            ))}
+                          </div>
+                          <span className="text-xs font-black text-slate-700 dark:text-slate-200">{filled}<span className="text-slate-400 font-bold">/13</span></span>
+                        </div>
+                      );
+                    })()}
+                    {mySession && (
+                      <>
+                        <button onClick={handleSaveEffectif} disabled={savingEffectif}
+                          className="flex items-center gap-2 px-5 py-2 bg-violet-600 text-white rounded-xl text-xs font-black shadow-md shadow-violet-500/25 hover:bg-violet-700 active:scale-95 transition-all disabled:opacity-50">
+                          {savingEffectif ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                          Enregistrer
+                        </button>
+                        <button onClick={() => handlePrintEffectif(effectifForm)}
+                          className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-violet-600 hover:border-violet-300 dark:hover:border-violet-600 transition-all shadow-sm" title="Imprimer / PDF">
+                          <FileText className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  </div>
+
+                  {/* Saved info */}
+                  {effectifForm.savedAt && (
+                    <div className="mx-6 mt-4 px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/30 rounded-xl flex items-center gap-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <p className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300">Enregistré le {effectifForm.savedAt} par {effectifForm.savedBy}</p>
+                    </div>
+                  )}
+
+                  {/* No session */}
+                  {!mySession ? (
+                    <div className="flex-grow flex flex-col items-center justify-center text-center p-10">
+                      <div className="w-16 h-16 bg-violet-100 dark:bg-violet-900/30 rounded-2xl flex items-center justify-center mb-4">
+                        <Users className="w-8 h-8 text-violet-400" />
+                      </div>
+                      <p className="text-sm font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Connexion requise</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Connectez-vous en tant qu'Éditeur ou Admin pour saisir l'effectif.</p>
+                    </div>
+                  ) : (
+                    <div className="flex-grow p-6 space-y-8">
+
+                      {/* ── DIRECTION PISTE ── */}
+                      <section>
+                        <div className="flex items-center gap-3 mb-5">
+                          <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/30 shrink-0">
+                            <Sunrise className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-[0.15em]">Direction Piste</span>
+                            <p className="text-[9px] text-slate-400 font-medium">8 postes</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                          {/* DO Piste — auto */}
+                          <div className="sm:col-span-2 xl:col-span-2 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/30 dark:to-slate-800 rounded-2xl border border-blue-200 dark:border-blue-800/50 shadow-sm hover:shadow-md transition-all overflow-hidden">
+                            <div className="px-5 pt-5 pb-3 flex items-start justify-between">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shrink-0">
+                                  <ShieldCheck className="w-4 h-4 text-white" />
+                                </div>
+                                <div>
+                                  <p className="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">DO Piste</p>
+                                  <p className="text-[9px] text-slate-400 font-medium">Utilisateur connecté</p>
+                                </div>
+                              </div>
+                              {effectifForm.doPiste && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />}
+                            </div>
+                            <div className="px-5 pb-5">
+                              <input type="text" value={effectifForm.doPiste}
+                                readOnly={mySession.role === 'editor'}
+                                onChange={e => setEffectifForm(f => ({ ...f, doPiste: e.target.value }))}
+                                placeholder="Nom du DO Piste…"
+                                className={`w-full px-4 py-3 rounded-xl text-sm font-bold outline-none transition-all border ${mySession.role === 'editor' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 cursor-default' : 'bg-white dark:bg-slate-700/50 border-blue-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400'}`} />
+                            </div>
+                          </div>
+                          {/* Leaders Piste */}
+                          {([
+                            { key: 'leaderZoneBCE', label: 'Leader Zone B, C, E' },
+                            { key: 'leaderZoneDJF', label: 'Leader Zone D, J, F' },
+                            { key: 'regulateurPlanche', label: 'Régulateur Planche' },
+                            { key: 'leaderPushback', label: 'Leader Pushback' },
+                            { key: 'leaderCabine', label: 'Leader Cabine' },
+                            { key: 'regulateurBagagistes', label: 'Régulateur Bagagistes' },
+                            { key: 'regulateurBus', label: 'Régulateur Bus' },
+                          ] as { key: keyof EffectifVacation; label: string }[]).map(({ key, label }) => (
+                            <div key={key} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md hover:border-blue-300 dark:hover:border-blue-700 transition-all overflow-hidden">
+                              <div className="px-4 pt-4 pb-2 flex items-start justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg flex items-center justify-center shrink-0">
+                                    <User className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+                                  </div>
+                                  <p className="text-[8px] font-black text-blue-500 dark:text-blue-400 uppercase tracking-wider leading-tight">{label}</p>
+                                </div>
+                                {effectifForm[key] && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
+                              </div>
+                              <div className="px-4 pb-4">
+                                <input type="text" value={String(effectifForm[key] || '')}
+                                  onChange={e => setEffectifForm(f => ({ ...f, [key]: e.target.value }))}
+                                  placeholder="Nom…"
+                                  className="w-full px-3 py-2.5 rounded-xl text-xs font-bold bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600 placeholder:font-normal" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+
+                      {/* ── DIRECTION ZONES ── */}
+                      <section>
+                        <div className="flex items-center gap-3 mb-5">
+                          <div className="w-8 h-8 bg-emerald-600 rounded-xl flex items-center justify-center shadow-md shadow-emerald-500/30 shrink-0">
+                            <Database className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-[0.15em]">Direction Zones</span>
+                            <p className="text-[9px] text-slate-400 font-medium">5 postes</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+                          {/* DO Zones — span 2 */}
+                          <div className="sm:col-span-2 xl:col-span-2 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/30 dark:to-slate-800 rounded-2xl border border-emerald-200 dark:border-emerald-800/50 shadow-sm hover:shadow-md transition-all overflow-hidden">
+                            <div className="px-5 pt-5 pb-3 flex items-start justify-between">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 bg-emerald-600 rounded-xl flex items-center justify-center shrink-0">
+                                  <ShieldCheck className="w-4 h-4 text-white" />
+                                </div>
+                                <div>
+                                  <p className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">DO Zones</p>
+                                  <p className="text-[9px] text-slate-400 font-medium">Responsable Zones</p>
+                                </div>
+                              </div>
+                              {effectifForm.doZones && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />}
+                            </div>
+                            <div className="px-5 pb-5">
+                              <input type="text" value={effectifForm.doZones}
+                                onChange={e => setEffectifForm(f => ({ ...f, doZones: e.target.value }))}
+                                placeholder="Nom du DO Zones…"
+                                className="w-full px-4 py-3 rounded-xl text-sm font-bold bg-white dark:bg-slate-700/50 border border-emerald-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 outline-none transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600 placeholder:font-normal" />
+                            </div>
+                          </div>
+                          {/* Leaders Zones */}
+                          {([
+                            { key: 'leaderT1', label: 'Leader T1' },
+                            { key: 'leaderT2', label: 'Leader T2' },
+                            { key: 'leaderCorrespondance', label: 'Leader Correspondance' },
+                            { key: 'leaderLivraison', label: 'Leader Livraison' },
+                          ] as { key: keyof EffectifVacation; label: string }[]).map(({ key, label }) => (
+                            <div key={key} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md hover:border-emerald-300 dark:hover:border-emerald-700 transition-all overflow-hidden">
+                              <div className="px-4 pt-4 pb-2 flex items-start justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg flex items-center justify-center shrink-0">
+                                    <User className="w-3 h-3 text-emerald-500 dark:text-emerald-400" />
+                                  </div>
+                                  <p className="text-[8px] font-black text-emerald-500 dark:text-emerald-400 uppercase tracking-wider leading-tight">{label}</p>
+                                </div>
+                                {effectifForm[key] && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
+                              </div>
+                              <div className="px-4 pb-4">
+                                <input type="text" value={String(effectifForm[key] || '')}
+                                  onChange={e => setEffectifForm(f => ({ ...f, [key]: e.target.value }))}
+                                  placeholder="Nom…"
+                                  className="w-full px-3 py-2.5 rounded-xl text-xs font-bold bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 outline-none transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600 placeholder:font-normal" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+
                     </div>
                   )}
                 </div>
