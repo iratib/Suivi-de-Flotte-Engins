@@ -2680,17 +2680,16 @@ ${hsItems.length > 0 ? `
                                 </div>
                                 <div>
                                   <p className="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">DO Piste</p>
-                                  <p className="text-[9px] text-slate-400 font-medium">Utilisateur connecté</p>
                                 </div>
                               </div>
                               {effectifForm.doPiste && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />}
                             </div>
                             <div className="px-5 pb-5">
                               <input type="text" value={effectifForm.doPiste}
-                                readOnly={mySession.role === 'editor'}
+                                disabled={effectifForm.locked}
                                 onChange={e => setEffectifForm(f => ({ ...f, doPiste: e.target.value }))}
                                 placeholder="Nom du DO Piste…"
-                                className={`w-full px-4 py-3 rounded-xl text-sm font-bold outline-none transition-all border ${mySession.role === 'editor' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 cursor-default' : 'bg-white dark:bg-slate-700/50 border-blue-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400'}`} />
+                                className={`w-full px-4 py-3 rounded-xl text-sm font-bold outline-none transition-all border ${effectifForm.locked ? 'bg-slate-50 dark:bg-slate-900/50 text-slate-400 border-slate-200 dark:border-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700/50 border-blue-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400'}`} />
                             </div>
                           </div>
                           {/* Leaders Piste */}
