@@ -850,6 +850,8 @@ export default function App() {
 
     const mid = Math.ceil(typeRows.length / 2);
 
+    const logoUrl = `${window.location.origin}${import.meta.env.BASE_URL}images/logo.png`;
+
     const w = window.open('', '_blank', 'width=960,height=750');
     if (!w) return;
     w.document.write(`<!DOCTYPE html>
@@ -863,7 +865,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;color:#1e
 .header{background:linear-gradient(135deg,#0f2d5c 0%,#1e40af 55%,#3b82f6 100%);color:#fff;padding:32px 36px 24px;border-radius:20px;margin-bottom:24px}
 .header-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
 .logo-row{display:flex;align-items:center;gap:14px}
-.logo-box{width:48px;height:48px;background:rgba(255,255,255,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
+.logo-box{width:48px;height:48px;background:rgba(255,255,255,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;padding:6px}
+.logo-box img{width:100%;height:100%;object-fit:contain}
 .report-title{font-size:22px;font-weight:900;letter-spacing:-0.5px}
 .report-sub{font-size:10px;opacity:.7;margin-top:4px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .meta{text-align:right;font-size:10px;opacity:.8;line-height:1.6}
@@ -907,13 +910,13 @@ tr:last-child td{border-bottom:none}
 <div class="header">
   <div class="header-top">
     <div class="logo-row">
-      <div class="logo-box">✈️</div>
+      <div class="logo-box"><img src="${logoUrl}" alt="logo"/></div>
       <div>
         <div class="report-title">Rapport Général de Flotte</div>
-        <div class="report-sub">Suivi de Flotte Engins · Interface Aéroportuaire</div>
+        <div class="report-sub">Suivi de Flotte Engins · Département Ramp</div>
       </div>
     </div>
-    <div class="meta"><strong>${dateStr}</strong>Généré à ${timeStr}<br>Source : Google Sheets</div>
+    <div class="meta"><strong>${dateStr}</strong></div>
   </div>
   <div class="divider"></div>
   <div class="kpis">
@@ -965,7 +968,7 @@ tr:last-child td{border-bottom:none}
 
 <div class="section">
   <div class="sec-head">
-    <div class="sec-icon" style="background:#dbeafe">🚜</div>
+    <div class="sec-icon" style="background:#dbeafe;font-size:0"></div>
     <span class="sec-title">Performance par Type d'Engin</span>
   </div>
   <div class="sec-body">
@@ -1037,9 +1040,7 @@ ${hsItems.length > 0 ? `
 </div>
 
 <div class="footer">
-  <strong style="color:#475569;font-size:10px">Suivi de Flotte Engins — Rapport Général</strong><br>
-  Généré le ${dateStr} à ${timeStr} · Données synchronisées depuis Google Sheets<br>
-  ${retired.length > 0 ? `${retired.length} engin${retired.length > 1 ? 's' : ''} retiré${retired.length > 1 ? 's' : ''} du parc non inclus dans ce rapport.` : ''}
+  <strong style="color:#475569;font-size:10px">Suivi de Flotte Engins — Rapport Général</strong>
 </div>
 
 </div></body></html>`);
