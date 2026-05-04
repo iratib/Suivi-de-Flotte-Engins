@@ -2687,8 +2687,9 @@ ${hsItems.length > 0 ? `
                             <div className="px-5 pb-5">
                               <input type="text" value={effectifForm.doPiste}
                                 disabled={effectifForm.locked}
-                                onChange={e => setEffectifForm(f => ({ ...f, doPiste: e.target.value }))}
-                                placeholder="Nom du DO Piste…"
+                                onChange={e => setEffectifForm(f => ({ ...f, doPiste: e.target.value.toUpperCase() }))}
+                                placeholder="NOM DU DO PISTE…"
+                                style={{ textTransform: 'uppercase' }}
                                 className={`w-full px-4 py-3 rounded-xl text-sm font-bold outline-none transition-all border ${effectifForm.locked ? 'bg-slate-50 dark:bg-slate-900/50 text-slate-400 border-slate-200 dark:border-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700/50 border-blue-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400'}`} />
                             </div>
                           </div>
@@ -2714,8 +2715,9 @@ ${hsItems.length > 0 ? `
                               </div>
                               <div className="px-4 pb-4">
                                 <input type="text" value={String(effectifForm[key] || '')}
-                                  onChange={e => setEffectifForm(f => ({ ...f, [key]: e.target.value }))}
-                                  placeholder="Nom…"
+                                  onChange={e => setEffectifForm(f => ({ ...f, [key]: e.target.value.toUpperCase() }))}
+                                  placeholder="NOM…"
+                                  style={{ textTransform: 'uppercase' }}
                                   className="w-full px-3 py-2.5 rounded-xl text-xs font-bold bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600 placeholder:font-normal" />
                               </div>
                             </div>
@@ -2751,8 +2753,9 @@ ${hsItems.length > 0 ? `
                             </div>
                             <div className="px-5 pb-5">
                               <input type="text" value={effectifForm.doZones}
-                                onChange={e => setEffectifForm(f => ({ ...f, doZones: e.target.value }))}
-                                placeholder="Nom du DO Zones…"
+                                onChange={e => setEffectifForm(f => ({ ...f, doZones: e.target.value.toUpperCase() }))}
+                                placeholder="NOM DU DO ZONES…"
+                                style={{ textTransform: 'uppercase' }}
                                 className="w-full px-4 py-3 rounded-xl text-sm font-bold bg-white dark:bg-slate-700/50 border border-emerald-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 outline-none transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600 placeholder:font-normal" />
                             </div>
                           </div>
@@ -2775,8 +2778,9 @@ ${hsItems.length > 0 ? `
                               </div>
                               <div className="px-4 pb-4">
                                 <input type="text" value={String(effectifForm[key] || '')}
-                                  onChange={e => setEffectifForm(f => ({ ...f, [key]: e.target.value }))}
-                                  placeholder="Nom…"
+                                  onChange={e => setEffectifForm(f => ({ ...f, [key]: e.target.value.toUpperCase() }))}
+                                  placeholder="NOM…"
+                                  style={{ textTransform: 'uppercase' }}
                                   className="w-full px-3 py-2.5 rounded-xl text-xs font-bold bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 outline-none transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600 placeholder:font-normal" />
                               </div>
                             </div>
