@@ -776,6 +776,276 @@ export default function App() {
     setTimeout(() => w.print(), 500);
   };
 
+  const handleGenerateReport = () => {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const active = data.filter(d => d.statut !== 'Retiré');
+    const retired = data.filter(d => d.statut === 'Retiré');
+    const total = active.length;
+    const ok = active.filter(d => d.etat === 'OK').length;
+    const hs = active.filter(d => d.etat === 'HS').length;
+    const taux = total > 0 ? Math.round(ok / total * 100) : 0;
+
+    const typeMap: Record<string, { total: number; ok: number; hs: number }> = {};
+    active.forEach(d => {
+      const k = d.designation.toUpperCase();
+      if (!typeMap[k]) typeMap[k] = { total: 0, ok: 0, hs: 0 };
+      typeMap[k].total++;
+      if (d.etat === 'OK') typeMap[k].ok++;
+      if (d.etat === 'HS') typeMap[k].hs++;
+    });
+    const typeRows = Object.entries(typeMap)
+      .map(([name, c]) => ({ name, ...c, taux: c.total > 0 ? Math.round(c.ok / c.total * 100) : 0 }))
+      .sort((a, b) => b.total - a.total);
+
+    const zoneMap: Record<string, { total: number; ok: number; hs: number }> = {};
+    active.forEach(d => {
+      const k = d.zone || 'N/A';
+      if (!zoneMap[k]) zoneMap[k] = { total: 0, ok: 0, hs: 0 };
+      zoneMap[k].total++;
+      if (d.etat === 'OK') zoneMap[k].ok++;
+      if (d.etat === 'HS') zoneMap[k].hs++;
+    });
+    const zoneRows = Object.entries(zoneMap)
+      .map(([name, c]) => ({ name, ...c, taux: c.total > 0 ? Math.round(c.ok / c.total * 100) : 0 }))
+      .sort((a, b) => b.total - a.total);
+
+    const maxTypeTotal = Math.max(...typeRows.map(r => r.total), 1);
+    const maxZoneTotal = Math.max(...zoneRows.map(r => r.total), 1);
+    const hsItems = active.filter(d => d.etat === 'HS');
+
+    const circumference = 2 * Math.PI * 55;
+    const okArc = total > 0 ? (ok / total) * circumference : 0;
+    const hsArc = total > 0 ? (hs / total) * circumference : 0;
+    const pieSvg = total === 0
+      ? `<svg viewBox="0 0 160 160" width="160" height="160"><circle cx="80" cy="80" r="55" fill="none" stroke="#e2e8f0" stroke-width="20"/><text x="80" y="88" text-anchor="middle" font-size="18" font-weight="900" fill="#94a3b8">—</text></svg>`
+      : `<svg viewBox="0 0 160 160" width="160" height="160">
+          <circle cx="80" cy="80" r="55" fill="none" stroke="#f1f5f9" stroke-width="20"/>
+          ${ok > 0 ? `<circle cx="80" cy="80" r="55" fill="none" stroke="#10b981" stroke-width="20" stroke-dasharray="${okArc} ${circumference}" stroke-dashoffset="${circumference / 4}" transform="rotate(-90 80 80)" stroke-linecap="round"/>` : ''}
+          ${hs > 0 ? `<circle cx="80" cy="80" r="55" fill="none" stroke="#f43f5e" stroke-width="20" stroke-dasharray="${hsArc} ${circumference}" stroke-dashoffset="${circumference / 4 - okArc}" transform="rotate(-90 80 80)" stroke-linecap="round"/>` : ''}
+          <text x="80" y="74" text-anchor="middle" font-size="24" font-weight="900" fill="${taux >= 80 ? '#10b981' : taux >= 50 ? '#f59e0b' : '#f43f5e'}">${taux}%</text>
+          <text x="80" y="92" text-anchor="middle" font-size="8" font-weight="700" fill="#94a3b8" letter-spacing="1.5">DISPONIBILITÉ</text>
+        </svg>`;
+
+    const barRows = (rows: { name: string; ok: number; hs: number; total: number }[], maxVal: number) =>
+      rows.map(row => {
+        const t = row.total > 0 ? Math.round(row.ok / row.total * 100) : 0;
+        const okPct = Math.round((row.ok / maxVal) * 100);
+        const hsPct = Math.round((row.hs / maxVal) * 100);
+        return `<div style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <span style="font-size:10px;font-weight:700;color:#475569;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${row.name}</span>
+            <span style="font-size:10px;font-weight:900;color:${t >= 80 ? '#10b981' : t >= 50 ? '#f59e0b' : '#f43f5e'}">${t}% · <span style="color:#94a3b8;font-weight:600">${row.total} eng.</span></span>
+          </div>
+          <div style="height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden">
+            <div style="height:100%;background:linear-gradient(90deg,#10b981,#059669);width:${okPct}%;display:inline-block;border-radius:5px 0 0 5px"></div><div style="height:100%;background:linear-gradient(90deg,#f43f5e,#e11d48);width:${hsPct}%;display:inline-block"></div>
+          </div>
+          <div style="display:flex;gap:12px;margin-top:4px">
+            ${row.ok > 0 ? `<span style="font-size:9px;color:#10b981;font-weight:700">✓ ${row.ok} OK</span>` : ''}
+            ${row.hs > 0 ? `<span style="font-size:9px;color:#f43f5e;font-weight:700">✕ ${row.hs} HS</span>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+
+    const mid = Math.ceil(typeRows.length / 2);
+
+    const w = window.open('', '_blank', 'width=960,height=750');
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rapport Général — Suivi de Flotte</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;color:#1e293b}
+.page{max-width:920px;margin:0 auto;padding:36px}
+.header{background:linear-gradient(135deg,#0f2d5c 0%,#1e40af 55%,#3b82f6 100%);color:#fff;padding:32px 36px 24px;border-radius:20px;margin-bottom:24px}
+.header-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
+.logo-row{display:flex;align-items:center;gap:14px}
+.logo-box{width:48px;height:48px;background:rgba(255,255,255,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
+.report-title{font-size:22px;font-weight:900;letter-spacing:-0.5px}
+.report-sub{font-size:10px;opacity:.7;margin-top:4px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.meta{text-align:right;font-size:10px;opacity:.8;line-height:1.6}
+.meta strong{display:block;font-size:13px;font-weight:800;opacity:1}
+.divider{height:1px;background:rgba(255,255,255,0.15);margin:18px 0}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.kpi{background:rgba(255,255,255,0.12);border-radius:12px;padding:14px;border:1px solid rgba(255,255,255,0.1)}
+.kpi-label{font-size:8px;font-weight:900;opacity:.7;text-transform:uppercase;letter-spacing:.12em}
+.kpi-value{font-size:26px;font-weight:900;line-height:1.1;margin-top:4px}
+.kpi-sub{font-size:9px;opacity:.6;margin-top:3px}
+.section{background:#fff;border-radius:16px;border:1px solid #e2e8f0;margin-bottom:18px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.sec-head{padding:12px 18px;border-bottom:1px solid #f1f5f9;background:#f8fafc;display:flex;align-items:center;gap:8px}
+.sec-icon{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.sec-title{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.15em;color:#64748b}
+.sec-body{padding:18px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.chart-label{font-size:9px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
+.legend{display:flex;justify-content:center;gap:16px;margin-top:10px;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:10px;color:#64748b;font-weight:700}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+table{width:100%;border-collapse:collapse}
+thead tr{background:#f8fafc}
+th{padding:9px 12px;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.12em;color:#94a3b8;text-align:left;border-bottom:2px solid #f1f5f9}
+td{padding:8px 12px;font-size:10px;border-bottom:1px solid #f8fafc;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:100px;font-size:9px;font-weight:900}
+.ok{background:#d1fae5;color:#065f46}.hs{background:#ffe4e6;color:#9f1239}
+.zone{background:#e0f2fe;color:#0369a1;padding:2px 7px;border-radius:100px;font-size:9px;font-weight:700;display:inline-block}
+.num{font-family:monospace;font-weight:700}
+.th{color:#10b981;font-weight:900}.tm{color:#f59e0b;font-weight:900}.tl{color:#f43f5e;font-weight:900}
+.footer{text-align:center;padding:16px;font-size:9px;color:#94a3b8;border-top:1px solid #e2e8f0;margin-top:4px;line-height:1.8}
+.print-btn{position:fixed;bottom:20px;right:20px;background:#1e40af;color:#fff;border:none;padding:11px 22px;border-radius:11px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(30,64,175,.4);z-index:999;display:flex;align-items:center;gap:7px}
+.print-btn:hover{background:#1d4ed8}
+@media print{body{background:#fff}.page{padding:16px}.header{border-radius:0;margin-bottom:16px}.print-btn{display:none}@page{margin:8mm}}
+</style></head>
+<body>
+<button class="print-btn" onclick="window.print()">🖨️ Télécharger PDF</button>
+<div class="page">
+
+<div class="header">
+  <div class="header-top">
+    <div class="logo-row">
+      <div class="logo-box">✈️</div>
+      <div>
+        <div class="report-title">Rapport Général de Flotte</div>
+        <div class="report-sub">Suivi de Flotte Engins · Interface Aéroportuaire</div>
+      </div>
+    </div>
+    <div class="meta"><strong>${dateStr}</strong>Généré à ${timeStr}<br>Source : Google Sheets</div>
+  </div>
+  <div class="divider"></div>
+  <div class="kpis">
+    <div class="kpi">
+      <div class="kpi-label">Total Engins</div>
+      <div class="kpi-value">${total}</div>
+      <div class="kpi-sub">Parc actif répertorié</div>
+    </div>
+    <div class="kpi" style="border-color:rgba(16,185,129,.3)">
+      <div class="kpi-label">Opérationnels</div>
+      <div class="kpi-value" style="color:#6ee7b7">${ok}</div>
+      <div class="kpi-sub">Disponibles immédiatement</div>
+    </div>
+    <div class="kpi" style="border-color:rgba(244,63,94,.3)">
+      <div class="kpi-label">Hors Service</div>
+      <div class="kpi-value" style="color:#fda4af">${hs}</div>
+      <div class="kpi-sub">Nécessitent intervention</div>
+    </div>
+    <div class="kpi" style="background:rgba(255,255,255,.18)">
+      <div class="kpi-label">Disponibilité</div>
+      <div class="kpi-value" style="color:${taux >= 80 ? '#6ee7b7' : taux >= 50 ? '#fcd34d' : '#fda4af'}">${taux}%</div>
+      <div class="kpi-sub">${retired.length} engin${retired.length > 1 ? 's' : ''} retiré${retired.length > 1 ? 's' : ''}</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="sec-head">
+    <div class="sec-icon" style="background:#ede9fe">📊</div>
+    <span class="sec-title">Vue d'Ensemble</span>
+  </div>
+  <div class="sec-body">
+    <div class="two-col">
+      <div style="text-align:center">
+        <div class="chart-label">État Global de la Flotte</div>
+        ${pieSvg}
+        <div class="legend">
+          ${ok > 0 ? `<div class="legend-item"><div class="dot" style="background:#10b981"></div>${ok} Opérationnel${ok > 1 ? 's' : ''}</div>` : ''}
+          ${hs > 0 ? `<div class="legend-item"><div class="dot" style="background:#f43f5e"></div>${hs} Hors Service</div>` : ''}
+        </div>
+      </div>
+      <div>
+        <div class="chart-label">Répartition par Zone</div>
+        ${barRows(zoneRows, maxZoneTotal)}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="sec-head">
+    <div class="sec-icon" style="background:#dbeafe">🚜</div>
+    <span class="sec-title">Performance par Type d'Engin</span>
+  </div>
+  <div class="sec-body">
+    <div class="two-col" style="margin-bottom:18px">
+      <div>${barRows(typeRows.slice(0, mid), maxTypeTotal)}</div>
+      <div>${barRows(typeRows.slice(mid), maxTypeTotal)}</div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Type d'Engin</th>
+        <th style="text-align:center">Total</th>
+        <th style="text-align:center">Opérationnel</th>
+        <th style="text-align:center">Hors Service</th>
+        <th style="text-align:right">Disponibilité</th>
+      </tr></thead>
+      <tbody>
+        ${typeRows.map(r => `<tr>
+          <td style="font-weight:700;color:#1e293b">${r.name}</td>
+          <td style="text-align:center" class="num">${r.total}</td>
+          <td style="text-align:center"><span class="badge ok">${r.ok}</span></td>
+          <td style="text-align:center">${r.hs > 0 ? `<span class="badge hs">${r.hs}</span>` : '<span style="color:#cbd5e1">—</span>'}</td>
+          <td style="text-align:right" class="${r.taux >= 80 ? 'th' : r.taux >= 50 ? 'tm' : 'tl'}">${r.taux}%</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+${hsItems.length > 0 ? `
+<div class="section" style="border-color:#fecdd3">
+  <div class="sec-head" style="background:#fff1f2">
+    <div class="sec-icon" style="background:#ffe4e6">⚠️</div>
+    <span class="sec-title" style="color:#e11d48">Engins Hors Service — Intervention Requise (${hsItems.length})</span>
+  </div>
+  <div class="sec-body" style="padding:0">
+    <table>
+      <thead><tr><th>Type d'Engin</th><th>N° Engin</th><th>Zone</th><th>Observation</th></tr></thead>
+      <tbody>
+        ${hsItems.map(d => `<tr>
+          <td style="font-weight:700">${d.designation}</td>
+          <td class="num">${d.numEngin}</td>
+          <td><span class="zone">${d.zone}</span></td>
+          <td style="color:#64748b">${d.observation || '—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>` : ''}
+
+<div class="section">
+  <div class="sec-head">
+    <div class="sec-icon" style="background:#dcfce7">📋</div>
+    <span class="sec-title">Flotte Active Complète — ${active.length} Engins</span>
+  </div>
+  <div class="sec-body" style="padding:0">
+    <table>
+      <thead><tr><th>Type d'Engin</th><th>N° Engin</th><th>Zone</th><th>État</th><th>Observation</th></tr></thead>
+      <tbody>
+        ${active.map(d => `<tr>
+          <td style="font-weight:700">${d.designation}</td>
+          <td class="num">${d.numEngin}</td>
+          <td><span class="zone">${d.zone}</span></td>
+          <td><span class="badge ${d.etat === 'OK' ? 'ok' : 'hs'}">${d.etat}</span></td>
+          <td style="color:#64748b;max-width:180px">${d.observation || '—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">
+  <strong style="color:#475569;font-size:10px">Suivi de Flotte Engins — Rapport Général</strong><br>
+  Généré le ${dateStr} à ${timeStr} · Données synchronisées depuis Google Sheets<br>
+  ${retired.length > 0 ? `${retired.length} engin${retired.length > 1 ? 's' : ''} retiré${retired.length > 1 ? 's' : ''} du parc non inclus dans ce rapport.` : ''}
+</div>
+
+</div></body></html>`);
+    w.document.close();
+    w.focus();
+  };
+
   useEffect(() => {
     fetchData();
     fetchHistory();
@@ -1575,6 +1845,20 @@ export default function App() {
                 </>
               ) : activeTab === 'dashboard' ? (
                 <div className="p-8 overflow-y-auto h-full space-y-8">
+                  {/* Dashboard header row */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-black text-slate-800 dark:text-white">Dashboard</h2>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium mt-0.5">Vue d'ensemble du parc engins en temps réel</p>
+                    </div>
+                    <button
+                      onClick={handleGenerateReport}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black shadow-lg shadow-blue-500/30 transition-all hover:scale-105 active:scale-95"
+                    >
+                      <FileText className="w-4 h-4" />
+                      Rapport Général
+                    </button>
+                  </div>
                   {/* KPI Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="bg-gradient-to-br from-blue-500 to-blue-700 p-6 rounded-2xl text-white shadow-xl flex flex-col justify-between">
