@@ -204,10 +204,10 @@ const getCurrentShift = (): 'Journée' | 'Nuit' => {
   return h >= 6 && h < 18 ? 'Journée' : 'Nuit';
 };
 
-const makeEmptyEffectif = (date: string, shift: 'Journée' | 'Nuit', name: string): EffectifVacation => ({
+const makeEmptyEffectif = (date: string, shift: 'Journée' | 'Nuit', _name: string): EffectifVacation => ({
   id: `${date}_${shift}`,
   date, shift,
-  doPiste: name, leaderZoneBCE: '', leaderZoneDJF: '', regulateurPlanche: '',
+  doPiste: '', leaderZoneBCE: '', leaderZoneDJF: '', regulateurPlanche: '',
   leaderPushback: '', leaderCabine: '', regulateurBagagistes: '', regulateurBus: '',
   doZones: '', leaderT1: '', leaderT2: '', leaderCorrespondance: '', leaderLivraison: '',
   locked: false, savedAt: '', savedBy: ''
