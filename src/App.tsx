@@ -1120,6 +1120,12 @@ ${hsItems.length > 0 ? `
     fetchData();
     fetchHistory();
     fetchUsers();
+    // Auto-refresh flotte toutes les 5 min (cache gviz = 2-5 min)
+    const fleetInterval = setInterval(() => {
+      fetchData();
+      fetchHistory();
+    }, 5 * 60 * 1000);
+    return () => clearInterval(fleetInterval);
   }, []);
 
   // ============================================================
@@ -1176,6 +1182,19 @@ ${hsItems.length > 0 ? `
           values: [fmtNow(), ...values, isEdit ? 'Modification' : 'Ajout', editorId]
         })
       });
+
+      // Mise à jour optimiste locale pour contourner le cache gviz (2-5 min)
+      if (isEdit) {
+        setData(prev => prev.map(d => d.rowIndex === editingRow ? {
+          ...d,
+          designation: form.designation,
+          numEngin:    form.numEngin,
+          zone:        form.zone,
+          etat:        form.etat,
+          observation: form.observation,
+          statusType:  getStatusType(form.etat)
+        } : d));
+      }
 
       setForm({ designation: '', numEngin: '', zone: 'PISTE', etat: 'OK', observation: '' });
       setEditingRow(null);
@@ -1395,7 +1414,7 @@ ${hsItems.length > 0 ? `
             <div>
               <h1 className="text-sm md:text-lg font-bold text-slate-800 dark:text-white leading-tight">Suivi de Flotte Engins</h1>
               <p className="hidden md:block text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-[0.15em]">
-                Interface Aéroportuaire — Google Sheets Sync
+                Interface Aéroportuaire — Département Ramp
               </p>
             </div>
           </div>
