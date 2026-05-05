@@ -735,45 +735,113 @@ export default function App() {
   };
 
   const handlePrintEffectif = (record: EffectifVacation) => {
-    const w = window.open('', '_blank', 'width=820,height=640');
-    if (!w) return;
-    const shiftBadge = record.shift === 'Journée'
-      ? '<span style="background:#fef3c7;color:#92400e;padding:3px 12px;border-radius:100px;font-size:11px;font-weight:700;">☀️ Journée</span>'
-      : '<span style="background:#e0e7ff;color:#3730a3;padding:3px 12px;border-radius:100px;font-size:11px;font-weight:700;">🌙 Nuit</span>';
+    const logoUrl = `${window.location.origin}${import.meta.env.BASE_URL}images/logo.png`;
     const displayDate = record.date ? record.date.split('-').reverse().join('/') : '';
-    const fields: [string, string, string][] = [
-      ['DIRECTION PISTE', 'DO Piste', record.doPiste],
-      ['DIRECTION PISTE', 'Leader Zone B, C, E', record.leaderZoneBCE],
-      ['DIRECTION PISTE', 'Leader Zone D, J, F', record.leaderZoneDJF],
-      ['DIRECTION PISTE', 'Régulateur Planche', record.regulateurPlanche],
-      ['DIRECTION PISTE', 'Leader Pushback', record.leaderPushback],
-      ['DIRECTION PISTE', 'Leader Cabine', record.leaderCabine],
-      ['DIRECTION PISTE', 'Régulateur Bagagistes', record.regulateurBagagistes],
-      ['DIRECTION PISTE', 'Régulateur Bus', record.regulateurBus],
-      ['DIRECTION ZONES', 'DO Zones', record.doZones],
-      ['DIRECTION ZONES', 'Leader T1', record.leaderT1],
-      ['DIRECTION ZONES', 'Leader T2', record.leaderT2],
-      ['DIRECTION ZONES', 'Leader Correspondance', record.leaderCorrespondance],
-      ['DIRECTION ZONES', 'Leader Livraison', record.leaderLivraison],
+    const isJournee = record.shift === 'Journée';
+
+    const pisteFields = [
+      ['DO Piste',               record.doPiste],
+      ['Leader Zone B, C, E',    record.leaderZoneBCE],
+      ['Leader Zone D, J, F',    record.leaderZoneDJF],
+      ['Régulateur Planche',     record.regulateurPlanche],
+      ['Leader Pushback',        record.leaderPushback],
+      ['Leader Cabine',          record.leaderCabine],
+      ['Régulateur Bagagistes',  record.regulateurBagagistes],
+      ['Régulateur Bus',         record.regulateurBus],
     ];
-    const sections = ['DIRECTION PISTE', 'DIRECTION ZONES'] as const;
-    const sectionColors: Record<string, string> = { 'DIRECTION PISTE': '#3b82f6', 'DIRECTION ZONES': '#10b981' };
-    w.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
-    <title>Effectif de Vacation — ${displayDate} ${record.shift}</title>
-    <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,-apple-system,sans-serif;padding:40px;color:#1e293b;background:#fff}.header{border-bottom:3px solid #7c3aed;padding-bottom:16px;margin-bottom:24px}.title{font-size:22px;font-weight:900;color:#1e293b;letter-spacing:-0.5px}.subtitle{font-size:12px;color:#64748b;margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.meta{font-size:10px;color:#94a3b8;margin-top:6px;font-family:monospace}.section-title{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.15em;padding:10px 16px;margin-top:16px}table{width:100%;border-collapse:collapse}tr:nth-child(even){background:#f8fafc}td{padding:10px 16px;font-size:12px;border-bottom:1px solid #f1f5f9}td:first-child{font-weight:700;color:#475569;width:220px}td:last-child{font-weight:600;color:#1e293b}.empty{color:#cbd5e1;font-style:italic;font-weight:400}.footer{margin-top:32px;border-top:1px solid #f1f5f9;padding-top:12px;font-size:9px;color:#94a3b8;display:flex;justify-content:space-between}@media print{body{padding:20px}@page{margin:12mm}}</style>
-    </head><body>
-    <div class="header"><div class="title">Effectif de Vacation</div>
-    <div class="subtitle"><span>Date : <strong>${displayDate}</strong></span>${shiftBadge}</div>
-    ${record.savedAt ? `<div class="meta">Enregistré le ${record.savedAt} par ${record.savedBy}</div>` : ''}</div>
-    ${sections.map(sec => {
-      const secFields = fields.filter(([s]) => s === sec);
-      return `<div class="section-title" style="color:${sectionColors[sec]};border-left:3px solid ${sectionColors[sec]};padding-left:12px">${sec}</div><table>${secFields.map(([, fn, val]) => `<tr><td>${fn}</td><td>${val ? val : '<span class="empty">—</span>'}</td></tr>`).join('')}</table>`;
-    }).join('')}
-    <div class="footer"><span>Suivi de Flotte Engins</span><span>Imprimé le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span></div>
-    </body></html>`);
+    const zonesFields = [
+      ['DO Zones',               record.doZones],
+      ['Leader T1',              record.leaderT1],
+      ['Leader T2',              record.leaderT2],
+      ['Leader Correspondance',  record.leaderCorrespondance],
+      ['Leader Livraison',       record.leaderLivraison],
+    ];
+
+    const fieldRow = (label: string, val: string, accent: string) =>
+      `<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9;gap:12px">
+        <div style="width:8px;height:8px;border-radius:50%;background:${accent};flex-shrink:0"></div>
+        <span style="font-size:10px;font-weight:700;color:#64748b;width:180px;flex-shrink:0">${label}</span>
+        <span style="font-size:11px;font-weight:800;color:${val ? '#1e293b' : '#cbd5e1'};font-style:${val ? 'normal' : 'italic'}">${val || '—'}</span>
+      </div>`;
+
+    const section = (title: string, fields: string[][], gradient: string, accent: string, icon: string) =>
+      `<div style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;margin-bottom:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05)">
+        <div style="background:${gradient};padding:14px 20px;display:flex;align-items:center;gap:10px">
+          <div style="width:30px;height:30px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">${icon}</div>
+          <span style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.15em;color:#fff">${title}</span>
+          <span style="margin-left:auto;font-size:9px;color:rgba(255,255,255,.7);font-weight:600">${fields.filter(([,v])=>v).length}/${fields.length} postes renseignés</span>
+        </div>
+        <div style="padding:4px 20px 12px">
+          ${fields.map(([l, v]) => fieldRow(l, v, accent)).join('')}
+        </div>
+      </div>`;
+
+    const w = window.open('', '_blank', 'width=860,height=700');
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Effectif de Vacation — ${displayDate} ${record.shift}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;color:#1e293b}
+.page{max-width:860px;margin:0 auto;padding:36px}
+.print-btn{position:fixed;bottom:20px;right:20px;background:#7c3aed;color:#fff;border:none;padding:11px 22px;border-radius:11px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(124,58,237,.4);z-index:999;display:flex;align-items:center;gap:7px}
+.print-btn:hover{background:#6d28d9}
+*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+@media print{.print-btn{display:none}body{background:#fff}.page{padding:16px}@page{margin:8mm}}
+</style></head>
+<body>
+<button class="print-btn" onclick="window.print()">🖨️ Télécharger PDF</button>
+<div class="page">
+
+  <!-- HEADER -->
+  <div style="background:linear-gradient(135deg,#4c1d95 0%,#7c3aed 55%,#a78bfa 100%);border-radius:20px;padding:28px 32px;margin-bottom:24px;color:#fff">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="width:48px;height:48px;background:rgba(255,255,255,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:6px;flex-shrink:0">
+          <img src="${logoUrl}" alt="logo" style="width:100%;height:100%;object-fit:contain"/>
+        </div>
+        <div>
+          <div style="font-size:20px;font-weight:900;letter-spacing:-0.5px">Effectif de Vacation</div>
+          <div style="font-size:10px;opacity:.7;margin-top:3px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Suivi de Flotte Engins · Département Ramp</div>
+        </div>
+      </div>
+      <div style="text-align:right;font-size:11px;opacity:.85">
+        <strong style="display:block;font-size:14px;font-weight:800">${displayDate}</strong>
+      </div>
+    </div>
+    <div style="height:1px;background:rgba(255,255,255,.15);margin-bottom:18px"></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:12px 20px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px">${isJournee ? '☀️' : '🌙'}</span>
+        <div>
+          <div style="font-size:8px;font-weight:900;opacity:.6;text-transform:uppercase;letter-spacing:.1em">Vacation</div>
+          <div style="font-size:16px;font-weight:900">${record.shift}</div>
+        </div>
+      </div>
+      ${record.savedAt ? `<div style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:12px 20px">
+        <div style="font-size:8px;font-weight:900;opacity:.6;text-transform:uppercase;letter-spacing:.1em">Enregistré par</div>
+        <div style="font-size:13px;font-weight:800;margin-top:2px">${record.savedBy}</div>
+        <div style="font-size:9px;opacity:.65;margin-top:1px">${record.savedAt}</div>
+      </div>` : ''}
+      <div style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:12px 20px">
+        <div style="font-size:8px;font-weight:900;opacity:.6;text-transform:uppercase;letter-spacing:.1em">Postes renseignés</div>
+        <div style="font-size:16px;font-weight:900;margin-top:2px">${[record.doPiste,record.leaderZoneBCE,record.leaderZoneDJF,record.regulateurPlanche,record.leaderPushback,record.leaderCabine,record.regulateurBagagistes,record.regulateurBus,record.doZones,record.leaderT1,record.leaderT2,record.leaderCorrespondance,record.leaderLivraison].filter(Boolean).length} / 13</div>
+      </div>
+    </div>
+  </div>
+
+  ${section('Direction Piste', pisteFields, 'linear-gradient(135deg,#1e40af,#3b82f6)', '#3b82f6', '✈️')}
+  ${section('Direction Zones', zonesFields, 'linear-gradient(135deg,#065f46,#10b981)', '#10b981', '🏢')}
+
+  <div style="text-align:center;padding:14px;font-size:9px;color:#94a3b8;border-top:1px solid #e2e8f0;margin-top:4px">
+    <strong style="color:#475569">Suivi de Flotte Engins — Effectif de Vacation</strong>
+  </div>
+</div>
+</body></html>`);
     w.document.close();
     w.focus();
-    setTimeout(() => w.print(), 500);
   };
 
   const handleGenerateReport = () => {
